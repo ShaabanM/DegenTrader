@@ -51,7 +51,7 @@ export async function fetchMarketData(): Promise<MarketData> {
       week52Low: quote.fiftyTwoWeekLow || 0,
       marketCap: quote.marketCap || 0,
       nav: quote.navPrice || quote.regularMarketPrice || 0,
-      expenseRatio: 0.0022, // VWRA TER is 0.22%
+      expenseRatio: 0.0019, // VWRA TER is 0.19%
       timestamp: Date.now(),
     }
   } catch (err) {
@@ -97,26 +97,24 @@ export async function fetchPriceHistory(
 }
 
 function getFallbackData(): MarketData {
-  // Reasonable VWRA values as of early 2026
-  const basePrice = 124.50
-  const change = (Math.random() - 0.48) * 3 // slight upward bias
+  // Static VWRA fallback values as of March 2026
   return {
     symbol: 'VWRA',
     name: 'Vanguard FTSE All-World UCITS ETF (USD) Accumulating',
     exchange: 'LSE',
     currency: 'USD',
-    price: basePrice + change,
-    previousClose: basePrice,
-    open: basePrice + (Math.random() - 0.5) * 1,
-    dayHigh: basePrice + Math.abs(change) + Math.random() * 1.5,
-    dayLow: basePrice - Math.abs(change) - Math.random() * 1.5,
-    volume: 45000 + Math.floor(Math.random() * 30000),
+    price: 172.64,
+    previousClose: 172.30,
+    open: 172.45,
+    dayHigh: 173.10,
+    dayLow: 171.80,
+    volume: 52000,
     avgVolume: 55000,
-    week52High: 132.80,
-    week52Low: 98.20,
-    marketCap: 15_200_000_000,
-    nav: basePrice + change * 0.99,
-    expenseRatio: 0.0022,
+    week52High: 202.30,
+    week52Low: 118.94,
+    marketCap: 55_390_000_000,
+    nav: 172.60,
+    expenseRatio: 0.0019,
     timestamp: Date.now(),
   }
 }
@@ -127,25 +125,34 @@ function generateFallbackHistory(range: string): PricePoint[] {
     '1d': 1, '5d': 5, '1mo': 22, '3mo': 66, '6mo': 130, '1y': 252
   }
   const days = daysMap[range] || 22
-  let price = 118 + Math.random() * 8
 
-  for (let i = days; i >= 0; i--) {
+  // Deterministic price history using a seeded-style approach
+  // End price ~172.64, work backwards with realistic daily moves
+  const endPrice = 172.64
+  const dailyVol = 0.008 // ~0.8% daily volatility
+  const prices: number[] = [endPrice]
+  for (let i = 1; i <= days; i++) {
+    // Use a simple deterministic sequence (sin-based) for reproducible data
+    const seed = i * 0.7 + days * 0.3
+    const move = Math.sin(seed) * dailyVol * prices[0] + (Math.cos(seed * 1.3) * dailyVol * prices[0] * 0.5)
+    prices.unshift(prices[0] - move)
+  }
+
+  for (let i = 0; i < prices.length; i++) {
     const date = new Date()
-    date.setDate(date.getDate() - i)
-    const volatility = 1.5
-    const drift = 0.02
-    const change = (Math.random() - 0.48) * volatility + drift
-    price += change
-    const high = price + Math.random() * volatility
-    const low = price - Math.random() * volatility
+    date.setDate(date.getDate() - (prices.length - 1 - i))
+    const p = prices[i]
+    const spread = p * 0.004 // 0.4% intraday range
+    const seedHigh = Math.abs(Math.sin(i * 2.1)) * spread
+    const seedLow = Math.abs(Math.sin(i * 3.7)) * spread
 
     points.push({
       date: date.toISOString(),
-      open: price - change * 0.3,
-      high,
-      low,
-      close: price,
-      volume: 40000 + Math.floor(Math.random() * 40000),
+      open: +(p - Math.sin(i * 1.1) * spread * 0.3).toFixed(2),
+      high: +(p + seedHigh).toFixed(2),
+      low: +(p - seedLow).toFixed(2),
+      close: +p.toFixed(2),
+      volume: 45000 + Math.floor(Math.abs(Math.sin(i * 4.3)) * 25000),
     })
   }
   return points

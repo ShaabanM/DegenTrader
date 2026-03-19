@@ -82,12 +82,17 @@ export function simulateTrade(
   const netProfit = grossProfit - totalFees
   const returnPct = actualCost > 0 ? (netProfit / actualCost) * 100 : 0
 
-  // Break-even: price where net profit = 0
-  // sellPrice * shares - sellFees - actualCost - buyFees = 0
-  // Approximate break-even (ignoring sell fee variation)
-  const breakEvenPrice = actualCost > 0
-    ? (actualCost + buyFees.totalFees + sellFees.totalFees) / shares
-    : 0
+  // Break-even: find sell price where net profit = 0
+  // Iterate since sell fees depend on sell value
+  let breakEvenPrice = 0
+  if (shares > 0) {
+    breakEvenPrice = (actualCost + buyFees.totalFees) / shares
+    for (let i = 0; i < 20; i++) {
+      const beSellValue = breakEvenPrice * shares
+      const beSellFees = calculateTradeFees(beSellValue, needsFxConversion)
+      breakEvenPrice = (actualCost + buyFees.totalFees + beSellFees.totalFees) / shares
+    }
+  }
 
   return {
     investmentAmount: investmentAmountUSD,
