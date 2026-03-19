@@ -11,7 +11,7 @@ import './App.css'
 type ChartRange = '1d' | '5d' | '1mo' | '3mo' | '6mo' | '1y'
 
 function App() {
-  const { data, loading, lastRefresh, refresh } = useMarketData()
+  const { data, loading, error, lastRefresh, refresh } = useMarketData()
   const [chartRange, setChartRange] = useState<ChartRange>('1mo')
   const { history, loading: chartLoading } = usePriceHistory(chartRange)
 
@@ -53,7 +53,8 @@ function App() {
           </>
         ) : (
           <div className="error-state">
-            <span>Failed to load market data</span>
+            <span>Unable to connect to market data</span>
+            {error && <span className="error-detail">{error}</span>}
             <button onClick={refresh}>Retry</button>
           </div>
         )}

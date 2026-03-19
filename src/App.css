@@ -797,6 +797,13 @@ body {
   100% { transform: scale(1.8); opacity: 0; }
 }
 
+.error-detail {
+  font-size: 12px;
+  color: var(--text-dim);
+  max-width: 400px;
+  text-align: center;
+}
+
 .error-state button {
   font-family: var(--font-mono);
   padding: 8px 20px;

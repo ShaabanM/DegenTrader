@@ -33,13 +33,19 @@ export function useMarketData(refreshInterval: number = 30000) {
 export function usePriceHistory(range: '1d' | '5d' | '1mo' | '3mo' | '6mo' | '1y' = '1mo') {
   const [history, setHistory] = useState<PricePoint[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     setLoading(true)
+    setError(null)
     fetchPriceHistory(range)
       .then(setHistory)
+      .catch(err => {
+        setError(err instanceof Error ? err.message : 'Failed to fetch chart data')
+        setHistory([])
+      })
       .finally(() => setLoading(false))
   }, [range])
 
-  return { history, loading }
+  return { history, loading, error }
 }

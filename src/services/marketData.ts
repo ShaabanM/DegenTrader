@@ -55,8 +55,7 @@ export async function fetchMarketData(): Promise<MarketData> {
       timestamp: Date.now(),
     }
   } catch (err) {
-    console.warn('Yahoo Finance API failed, using fallback data:', err)
-    return getFallbackData()
+    throw new Error('Unable to fetch market data. Yahoo Finance API may be unavailable.')
   }
 }
 
@@ -91,69 +90,7 @@ export async function fetchPriceHistory(
       volume: quotes.volume?.[i] || 0,
     }))
   } catch (err) {
-    console.warn('Chart data fetch failed:', err)
-    return generateFallbackHistory(range)
+    throw new Error('Unable to fetch price history.')
   }
 }
 
-function getFallbackData(): MarketData {
-  // Static VWRA fallback values as of March 2026
-  return {
-    symbol: 'VWRA',
-    name: 'Vanguard FTSE All-World UCITS ETF (USD) Accumulating',
-    exchange: 'LSE',
-    currency: 'USD',
-    price: 172.64,
-    previousClose: 172.30,
-    open: 172.45,
-    dayHigh: 173.10,
-    dayLow: 171.80,
-    volume: 52000,
-    avgVolume: 55000,
-    week52High: 202.30,
-    week52Low: 118.94,
-    marketCap: 55_390_000_000,
-    nav: 172.60,
-    expenseRatio: 0.0019,
-    timestamp: Date.now(),
-  }
-}
-
-function generateFallbackHistory(range: string): PricePoint[] {
-  const points: PricePoint[] = []
-  const daysMap: Record<string, number> = {
-    '1d': 1, '5d': 5, '1mo': 22, '3mo': 66, '6mo': 130, '1y': 252
-  }
-  const days = daysMap[range] || 22
-
-  // Deterministic price history using a seeded-style approach
-  // End price ~172.64, work backwards with realistic daily moves
-  const endPrice = 172.64
-  const dailyVol = 0.008 // ~0.8% daily volatility
-  const prices: number[] = [endPrice]
-  for (let i = 1; i <= days; i++) {
-    // Use a simple deterministic sequence (sin-based) for reproducible data
-    const seed = i * 0.7 + days * 0.3
-    const move = Math.sin(seed) * dailyVol * prices[0] + (Math.cos(seed * 1.3) * dailyVol * prices[0] * 0.5)
-    prices.unshift(prices[0] - move)
-  }
-
-  for (let i = 0; i < prices.length; i++) {
-    const date = new Date()
-    date.setDate(date.getDate() - (prices.length - 1 - i))
-    const p = prices[i]
-    const spread = p * 0.004 // 0.4% intraday range
-    const seedHigh = Math.abs(Math.sin(i * 2.1)) * spread
-    const seedLow = Math.abs(Math.sin(i * 3.7)) * spread
-
-    points.push({
-      date: date.toISOString(),
-      open: +(p - Math.sin(i * 1.1) * spread * 0.3).toFixed(2),
-      high: +(p + seedHigh).toFixed(2),
-      low: +(p - seedLow).toFixed(2),
-      close: +p.toFixed(2),
-      volume: 45000 + Math.floor(Math.abs(Math.sin(i * 4.3)) * 25000),
-    })
-  }
-  return points
-}
