@@ -10,7 +10,7 @@ export function TradeSimulator({ currentPrice }: TradeSimulatorProps) {
   const [investment, setInvestment] = useState(5000)
   const [buyPrice, setBuyPrice] = useState(currentPrice)
   const [sellPrice, setSellPrice] = useState(currentPrice * 1.02) // default 2% up
-  const [needsFx, setNeedsFx] = useState(true)
+  const [needsFx, setNeedsFx] = useState(false)
   const [initialized, setInitialized] = useState(false)
 
   // Sync buy price with current price on first load
@@ -39,7 +39,7 @@ export function TradeSimulator({ currentPrice }: TradeSimulatorProps) {
           <div className="input-group">
             <label>Investment Amount</label>
             <div className="input-with-prefix">
-              <span className="input-prefix">&pound;</span>
+              <span className="input-prefix">$</span>
               <input
                 type="number"
                 value={investment}
@@ -53,7 +53,7 @@ export function TradeSimulator({ currentPrice }: TradeSimulatorProps) {
           <div className="input-group">
             <label>Buy Price</label>
             <div className="input-with-prefix">
-              <span className="input-prefix">&pound;</span>
+              <span className="input-prefix">$</span>
               <input
                 type="number"
                 value={buyPrice}
@@ -70,7 +70,7 @@ export function TradeSimulator({ currentPrice }: TradeSimulatorProps) {
           <div className="input-group">
             <label>Sell Price</label>
             <div className="input-with-prefix">
-              <span className="input-prefix">&pound;</span>
+              <span className="input-prefix">$</span>
               <input
                 type="number"
                 value={sellPrice}
@@ -93,7 +93,7 @@ export function TradeSimulator({ currentPrice }: TradeSimulatorProps) {
           </div>
 
           <div className="input-group toggle-group">
-            <label>FX Conversion (USD/EUR &rarr; GBP)</label>
+            <label>FX Conversion (non-USD &rarr; USD)</label>
             <button
               className={`toggle ${needsFx ? 'on' : 'off'}`}
               onClick={() => setNeedsFx(!needsFx)}

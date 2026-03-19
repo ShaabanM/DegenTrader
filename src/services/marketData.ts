@@ -39,18 +39,18 @@ export async function fetchMarketData(): Promise<MarketData> {
       symbol: 'VWRA',
       name: 'Vanguard FTSE All-World UCITS ETF (USD) Accumulating',
       exchange: 'LSE',
-      currency: quote.currency || 'GBp',
-      price: (quote.regularMarketPrice || 0) / (quote.currency === 'GBp' ? 100 : 1),
-      previousClose: (quote.regularMarketPreviousClose || 0) / (quote.currency === 'GBp' ? 100 : 1),
-      open: (quote.regularMarketOpen || 0) / (quote.currency === 'GBp' ? 100 : 1),
-      dayHigh: (quote.regularMarketDayHigh || 0) / (quote.currency === 'GBp' ? 100 : 1),
-      dayLow: (quote.regularMarketDayLow || 0) / (quote.currency === 'GBp' ? 100 : 1),
+      currency: 'USD',
+      price: quote.regularMarketPrice || 0,
+      previousClose: quote.regularMarketPreviousClose || 0,
+      open: quote.regularMarketOpen || 0,
+      dayHigh: quote.regularMarketDayHigh || 0,
+      dayLow: quote.regularMarketDayLow || 0,
       volume: quote.regularMarketVolume || 0,
       avgVolume: quote.averageDailyVolume3Month || 0,
-      week52High: (quote.fiftyTwoWeekHigh || 0) / (quote.currency === 'GBp' ? 100 : 1),
-      week52Low: (quote.fiftyTwoWeekLow || 0) / (quote.currency === 'GBp' ? 100 : 1),
+      week52High: quote.fiftyTwoWeekHigh || 0,
+      week52Low: quote.fiftyTwoWeekLow || 0,
       marketCap: quote.marketCap || 0,
-      nav: (quote.navPrice || quote.regularMarketPrice || 0) / (quote.currency === 'GBp' ? 100 : 1),
+      nav: quote.navPrice || quote.regularMarketPrice || 0,
       expenseRatio: 0.0022, // VWRA TER is 0.22%
       timestamp: Date.now(),
     }
@@ -82,15 +82,12 @@ export async function fetchPriceHistory(
 
     const timestamps = result.timestamp || []
     const quotes = result.indicators?.quote?.[0] || {}
-    const isGBp = result.meta?.currency === 'GBp'
-    const divisor = isGBp ? 100 : 1
-
     return timestamps.map((ts: number, i: number) => ({
       date: new Date(ts * 1000).toISOString(),
-      open: (quotes.open?.[i] || 0) / divisor,
-      high: (quotes.high?.[i] || 0) / divisor,
-      low: (quotes.low?.[i] || 0) / divisor,
-      close: (quotes.close?.[i] || 0) / divisor,
+      open: quotes.open?.[i] || 0,
+      high: quotes.high?.[i] || 0,
+      low: quotes.low?.[i] || 0,
+      close: quotes.close?.[i] || 0,
       volume: quotes.volume?.[i] || 0,
     }))
   } catch (err) {
@@ -107,7 +104,7 @@ function getFallbackData(): MarketData {
     symbol: 'VWRA',
     name: 'Vanguard FTSE All-World UCITS ETF (USD) Accumulating',
     exchange: 'LSE',
-    currency: 'GBP',
+    currency: 'USD',
     price: basePrice + change,
     previousClose: basePrice,
     open: basePrice + (Math.random() - 0.5) * 1,

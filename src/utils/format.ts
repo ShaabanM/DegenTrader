@@ -1,4 +1,4 @@
-export function formatCurrency(value: number, currency: string = 'GBP', decimals: number = 2): string {
+export function formatCurrency(value: number, currency: string = 'USD', decimals: number = 2): string {
   const symbols: Record<string, string> = { GBP: '\u00a3', USD: '$', EUR: '\u20ac' }
   const symbol = symbols[currency] || currency + ' '
   const sign = value < 0 ? '-' : ''
