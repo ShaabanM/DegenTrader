@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { useMarketData, usePriceHistory } from './hooks/useMarketData'
+import { useTradeLog } from './hooks/useTradeLog'
 import { Header } from './components/Header'
 import { PriceCard } from './components/PriceCard'
 import { MarketStats } from './components/MarketStats'
 import { PriceChart } from './components/PriceChart'
 import { TradeSimulator } from './components/TradeSimulator'
+import { TradeLog } from './components/TradeLog'
 import { FutureModules } from './components/FutureModules'
 import './App.css'
 
@@ -14,6 +16,7 @@ function App() {
   const { data, loading, error, lastRefresh, refresh } = useMarketData()
   const [chartRange, setChartRange] = useState<ChartRange>('1mo')
   const { history, loading: chartLoading } = usePriceHistory(chartRange)
+  const { trades, addTrade, removeTrade, clearAll } = useTradeLog()
 
   return (
     <div className="app">
@@ -45,6 +48,16 @@ function App() {
 
             <section className="simulator-section">
               <TradeSimulator currentPrice={data.price} />
+            </section>
+
+            <section className="trade-log-section">
+              <TradeLog
+                trades={trades}
+                currentPrice={data.price}
+                onAdd={addTrade}
+                onRemove={removeTrade}
+                onClearAll={clearAll}
+              />
             </section>
 
             <section className="future-section">

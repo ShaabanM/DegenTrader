@@ -705,6 +705,247 @@ body {
 .positive { color: var(--green) !important; }
 .negative { color: var(--red) !important; }
 
+/* ===== TRADE LOG ===== */
+.trade-log-card {
+  background: var(--bg-card);
+}
+
+.portfolio-summary {
+  margin-bottom: 20px;
+}
+
+.portfolio-hero {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.portfolio-stat-block {
+  text-align: center;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.portfolio-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.portfolio-value {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 700;
+  display: block;
+}
+
+.portfolio-pct {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  display: block;
+  margin-top: 2px;
+}
+
+.portfolio-details {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Trade list */
+.trade-list {
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.trade-list-header {
+  display: grid;
+  grid-template-columns: 80px 60px 90px 100px 1fr 32px;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.trade-row {
+  display: grid;
+  grid-template-columns: 80px 60px 90px 100px 1fr 32px;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  align-items: center;
+}
+
+.trade-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.trade-date {
+  color: var(--text-secondary);
+}
+
+.remove-trade {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.remove-trade:hover {
+  color: var(--red);
+  background: var(--red-dim);
+}
+
+.clear-all-btn {
+  width: 100%;
+  padding: 8px;
+  background: none;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: all 0.2s;
+}
+
+.clear-all-btn:hover {
+  color: var(--red);
+  background: var(--red-dim);
+}
+
+/* Add trade form */
+.add-trade-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.add-trade-form .form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.add-trade-form .input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.add-trade-form label {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.add-trade-form input {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.add-trade-form input:focus {
+  border-color: var(--green);
+}
+
+.note-input {
+  font-size: 13px !important;
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.log-btn {
+  flex: 1;
+  padding: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  background: var(--green-dim);
+  border: 1px solid var(--green);
+  color: var(--green);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.log-btn:hover {
+  background: var(--green);
+  color: #000;
+}
+
+.cancel-btn {
+  padding: 10px 20px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.cancel-btn:hover {
+  border-color: var(--text-secondary);
+}
+
+.add-trade-btn {
+  width: 100%;
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  background: none;
+  border: 1px dashed var(--border);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.add-trade-btn:hover {
+  border-color: var(--green);
+  color: var(--green);
+  background: var(--green-dim);
+}
+
 /* ===== FUTURE MODULES ===== */
 .section-title {
   font-family: var(--font-mono);

@@ -43,6 +43,17 @@ export interface TradeSimulation {
   breakEvenPrice: number
 }
 
+// Trade log types
+export interface LoggedTrade {
+  id: string
+  shares: number
+  buyPrice: number
+  totalCost: number // shares * buyPrice + buy fees
+  buyFees: number
+  timestamp: number
+  note: string
+}
+
 // Future phase types
 export interface SentimentSignal {
   source: string

@@ -86,10 +86,23 @@ function parseChartResponse(data: unknown) {
 }
 
 export async function fetchMarketData(): Promise<MarketData> {
-  const path = `${YAHOO_CHART_PATH}/${VWRA_SYMBOL}?range=1d&interval=5m`
-  const data = await fetchFromYahoo(path)
-  const result = parseChartResponse(data)
-  const meta = result.meta!
+  // Fetch both 1d (for current data) and 1y (for accurate 52-week range)
+  const [dayData, yearData] = await Promise.all([
+    fetchFromYahoo(`${YAHOO_CHART_PATH}/${VWRA_SYMBOL}?range=1d&interval=5m`),
+    fetchFromYahoo(`${YAHOO_CHART_PATH}/${VWRA_SYMBOL}?range=1y&interval=1wk`),
+  ])
+
+  const dayResult = parseChartResponse(dayData)
+  const meta = dayResult.meta!
+
+  // Compute 52-week high/low from actual historical closing prices.
+  // Yahoo's metadata and intraday highs/lows contain bad tick data for VWRA.L
+  // (e.g. phantom spike to $202 on Dec 29). Closing prices are reliable.
+  const yearResult = parseChartResponse(yearData)
+  const yearQuotes = yearResult.indicators?.quote?.[0] || {}
+  const closes = (yearQuotes.close || []).filter((v): v is number => v != null && v > 0)
+  const week52High = closes.length > 0 ? Math.max(...closes) : 0
+  const week52Low = closes.length > 0 ? Math.min(...closes) : 0
 
   return {
     symbol: 'VWRA',
@@ -108,8 +121,8 @@ export async function fetchMarketData(): Promise<MarketData> {
       (meta.regularMarketDayLow as number) || (meta.dayLow as number) || 0,
     volume: (meta.regularMarketVolume as number) || 0,
     avgVolume: 55000,
-    week52High: (meta.fiftyTwoWeekHigh as number) || 0,
-    week52Low: (meta.fiftyTwoWeekLow as number) || 0,
+    week52High,
+    week52Low,
     marketCap: 0,
     nav: (meta.regularMarketPrice as number) || 0,
     expenseRatio: 0.0019,

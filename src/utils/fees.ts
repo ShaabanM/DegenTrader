@@ -92,6 +92,8 @@ export function simulateTrade(
       const beSellFees = calculateTradeFees(beSellValue, needsFxConversion)
       breakEvenPrice = (actualCost + buyFees.totalFees + beSellFees.totalFees) / shares
     }
+    // Conservative: round UP to nearest $0.10
+    breakEvenPrice = Math.ceil(breakEvenPrice * 10) / 10
   }
 
   return {
