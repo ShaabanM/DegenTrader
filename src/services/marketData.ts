@@ -1,42 +1,93 @@
 import type { MarketData, PricePoint } from '../types/market'
 
 /**
- * Market data service - fetches VWRA data from Yahoo Finance chart API
- * Uses the v8 chart endpoint which returns both metadata and price history
+ * Market data service - fetches VWRA data from Yahoo Finance chart API.
+ *
+ * Data flow:
+ *   Development: Vite dev proxy (/api/yahoo -> query2.finance.yahoo.com)
+ *   Production:  CF Worker proxy -> allorigins fallback
  */
 
-const YAHOO_CHART = 'https://query1.finance.yahoo.com/v8/finance/chart'
+const YAHOO_CHART_PATH = '/v8/finance/chart'
 const VWRA_SYMBOL = 'VWRA.L'
-const CORS_PROXY = 'https://corsproxy.io/?url='
 
-async function fetchWithProxy(url: string): Promise<Response> {
-  // Try direct first, fall back to CORS proxy
-  try {
-    const resp = await fetch(url)
-    if (resp.ok) return resp
-  } catch {
-    // Direct failed, try proxy
+const isDev = import.meta.env.DEV
+
+// CF Worker URL - set via VITE_API_WORKER_URL env var at build time
+const CF_WORKER_URL = import.meta.env.VITE_API_WORKER_URL as string | undefined
+
+async function fetchFromYahoo(chartPath: string): Promise<unknown> {
+  const errors: string[] = []
+
+  // In development, use Vite's built-in proxy (no CORS issues)
+  if (isDev) {
+    try {
+      const resp = await fetch(`/api/yahoo${chartPath}`)
+      if (resp.ok) return resp.json()
+      errors.push(`dev-proxy: HTTP ${resp.status}`)
+    } catch (err) {
+      errors.push(`dev-proxy: ${(err as Error).message}`)
+    }
   }
-  const proxyResp = await fetch(`${CORS_PROXY}${encodeURIComponent(url)}`)
-  if (!proxyResp.ok) throw new Error(`HTTP ${proxyResp.status}`)
-  return proxyResp
+
+  // Try Cloudflare Worker proxy (production primary)
+  if (CF_WORKER_URL) {
+    try {
+      const resp = await fetch(`${CF_WORKER_URL}${chartPath}`)
+      if (resp.ok) return resp.json()
+      errors.push(`cf-worker: HTTP ${resp.status}`)
+    } catch (err) {
+      errors.push(`cf-worker: ${(err as Error).message}`)
+    }
+  }
+
+  // Fallback: allorigins (wraps Yahoo response, adds CORS)
+  const yahooUrl = `https://query2.finance.yahoo.com${chartPath}`
+
+  // Try allorigins /raw first (returns raw JSON)
+  try {
+    const resp = await fetch(
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`
+    )
+    if (resp.ok) return resp.json()
+    errors.push(`allorigins-raw: HTTP ${resp.status}`)
+  } catch (err) {
+    errors.push(`allorigins-raw: ${(err as Error).message}`)
+  }
+
+  // Try allorigins /get (wraps in {contents: "..."} envelope)
+  try {
+    const resp = await fetch(
+      `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`
+    )
+    if (resp.ok) {
+      const wrapper = (await resp.json()) as { contents?: string }
+      if (wrapper?.contents) return JSON.parse(wrapper.contents)
+    }
+    errors.push(`allorigins-get: HTTP ${resp.status}`)
+  } catch (err) {
+    errors.push(`allorigins-get: ${(err as Error).message}`)
+  }
+
+  throw new Error(`All data sources failed: ${errors.join('; ')}`)
 }
 
 function parseChartResponse(data: unknown) {
-  const result = (data as { chart?: { result?: unknown[] } })?.chart?.result?.[0] as {
-    meta?: Record<string, unknown>
-    timestamp?: number[]
-    indicators?: { quote?: Record<string, (number | null)[]>[] }
-  } | undefined
+  const result = (data as { chart?: { result?: unknown[] } })?.chart
+    ?.result?.[0] as
+    | {
+        meta?: Record<string, unknown>
+        timestamp?: number[]
+        indicators?: { quote?: Record<string, (number | null)[]>[] }
+      }
+    | undefined
   if (!result?.meta) throw new Error('No data returned from Yahoo Finance')
   return result
 }
 
 export async function fetchMarketData(): Promise<MarketData> {
-  const url = `${YAHOO_CHART}/${VWRA_SYMBOL}?range=1d&interval=5m`
-
-  const resp = await fetchWithProxy(url)
-  const data = await resp.json()
+  const path = `${YAHOO_CHART_PATH}/${VWRA_SYMBOL}?range=1d&interval=5m`
+  const data = await fetchFromYahoo(path)
   const result = parseChartResponse(data)
   const meta = result.meta!
 
@@ -45,17 +96,22 @@ export async function fetchMarketData(): Promise<MarketData> {
     name: 'Vanguard FTSE All-World UCITS ETF (USD) Accumulating',
     exchange: 'LSE',
     currency: 'USD',
-    price: meta.regularMarketPrice as number || 0,
-    previousClose: meta.chartPreviousClose as number || meta.previousClose as number || 0,
-    open: meta.regularMarketOpen as number || 0,
-    dayHigh: meta.regularMarketDayHigh as number || meta.dayHigh as number || 0,
-    dayLow: meta.regularMarketDayLow as number || meta.dayLow as number || 0,
-    volume: meta.regularMarketVolume as number || 0,
+    price: (meta.regularMarketPrice as number) || 0,
+    previousClose:
+      (meta.chartPreviousClose as number) ||
+      (meta.previousClose as number) ||
+      0,
+    open: (meta.regularMarketOpen as number) || 0,
+    dayHigh:
+      (meta.regularMarketDayHigh as number) || (meta.dayHigh as number) || 0,
+    dayLow:
+      (meta.regularMarketDayLow as number) || (meta.dayLow as number) || 0,
+    volume: (meta.regularMarketVolume as number) || 0,
     avgVolume: 55000,
-    week52High: meta.fiftyTwoWeekHigh as number || 0,
-    week52Low: meta.fiftyTwoWeekLow as number || 0,
+    week52High: (meta.fiftyTwoWeekHigh as number) || 0,
+    week52Low: (meta.fiftyTwoWeekLow as number) || 0,
     marketCap: 0,
-    nav: meta.regularMarketPrice as number || 0,
+    nav: (meta.regularMarketPrice as number) || 0,
     expenseRatio: 0.0019,
     timestamp: Date.now(),
   }
@@ -73,10 +129,8 @@ export async function fetchPriceHistory(
     '1y': '1wk',
   }
 
-  const url = `${YAHOO_CHART}/${VWRA_SYMBOL}?range=${range}&interval=${intervalMap[range]}`
-
-  const resp = await fetchWithProxy(url)
-  const data = await resp.json()
+  const path = `${YAHOO_CHART_PATH}/${VWRA_SYMBOL}?range=${range}&interval=${intervalMap[range]}`
+  const data = await fetchFromYahoo(path)
   const result = parseChartResponse(data)
 
   const timestamps = result.timestamp || []
