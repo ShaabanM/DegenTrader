@@ -54,19 +54,71 @@ export interface LoggedTrade {
   note: string
 }
 
-// Future phase types
+// ===== Algo Trading Types =====
+
+export type SignalAction = 'BUY' | 'SELL' | 'FLAT'
+
+export interface AlgoSignal {
+  id: string
+  name: string
+  action: SignalAction
+  confidence: number  // 0-1
+  reasoning: string
+  entryPrice?: number
+  exitPrice?: number
+  timestamp: number
+}
+
+export interface AlgoInput {
+  vwraPrices: PricePoint[]
+  oilPrices: PricePoint[]
+  currentVwra: number
+  currentOil: number
+}
+
+export interface AlgoOutput {
+  action: SignalAction
+  confidence: number
+  reasoning: string
+  entryPrice?: number
+  exitPrice?: number
+}
+
+export interface Algorithm {
+  id: string
+  name: string
+  description: string
+  category: 'momentum' | 'mean-reversion' | 'technical' | 'cross-asset' | 'volatility'
+  compute(input: AlgoInput): AlgoOutput
+  backtest(input: AlgoInput): BacktestTrade[]
+}
+
+export interface BacktestTrade {
+  entryDate: string
+  exitDate: string
+  entryPrice: number
+  exitPrice: number
+  action: 'BUY' | 'SELL'
+  pnl: number
+  pnlPct: number
+}
+
+export interface BacktestResult {
+  algoId: string
+  algoName: string
+  trades: BacktestTrade[]
+  totalReturn: number
+  totalReturnPct: number
+  winRate: number
+  maxDrawdown: number
+  sharpeRatio: number
+  equityCurve: { date: string; equity: number }[]
+}
+
 export interface SentimentSignal {
   source: string
   sentiment: 'bullish' | 'bearish' | 'neutral'
   confidence: number
   summary: string
-  timestamp: number
-}
-
-export interface AlgoSignal {
-  strategy: string
-  action: 'buy' | 'sell' | 'hold'
-  confidence: number
-  reason: string
   timestamp: number
 }
