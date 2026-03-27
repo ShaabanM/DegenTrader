@@ -1,217 +1,181 @@
 import type { MarketData, PricePoint } from '../types/market'
 
-/**
- * Market data service - fetches data from Yahoo Finance chart API.
- *
- * Data flow:
- *   Development: Vite dev proxy (/api/yahoo -> query2.finance.yahoo.com)
- *   Production:  CF Worker proxy -> allorigins fallback
- */
-
 const YAHOO_CHART_PATH = '/v8/finance/chart'
-
 const isDev = import.meta.env.DEV
-
-// CF Worker URL - set via VITE_API_WORKER_URL env var at build time
 const CF_WORKER_URL = import.meta.env.VITE_API_WORKER_URL as string | undefined
 
-// Symbol metadata for display
 const SYMBOL_META: Record<string, { name: string; exchange: string; currency: string; expenseRatio: number }> = {
   'VWRA.L': { name: 'Vanguard FTSE All-World UCITS ETF', exchange: 'LSE', currency: 'USD', expenseRatio: 0.0019 },
-  'BZ=F': { name: 'Brent Crude Oil Futures', exchange: 'NYMEX', currency: 'USD', expenseRatio: 0 },
-  'CL=F': { name: 'WTI Crude Oil Futures', exchange: 'NYMEX', currency: 'USD', expenseRatio: 0 },
+  'BZ=F': { name: 'Brent Crude Oil Futures', exchange: 'ICE', currency: 'USD', expenseRatio: 0 },
+}
+
+type ChartResult = {
+  meta?: {
+    regularMarketPrice?: number
+    chartPreviousClose?: number
+    previousClose?: number
+    regularMarketOpen?: number
+    regularMarketDayHigh?: number
+    regularMarketDayLow?: number
+    dayHigh?: number
+    dayLow?: number
+    regularMarketVolume?: number
+    regularMarketTime?: number
+  }
+  timestamp?: number[]
+  indicators?: {
+    quote?: Array<Record<string, Array<number | null>>>
+  }
 }
 
 async function fetchFromYahoo(chartPath: string): Promise<unknown> {
   const errors: string[] = []
 
-  // In development, use Vite's built-in proxy (no CORS issues)
   if (isDev) {
     try {
-      const resp = await fetch(`/api/yahoo${chartPath}`)
-      if (resp.ok) return resp.json()
-      errors.push(`dev-proxy: HTTP ${resp.status}`)
-    } catch (err) {
-      errors.push(`dev-proxy: ${(err as Error).message}`)
+      const response = await fetch(`/api/yahoo${chartPath}`)
+      if (response.ok) return response.json()
+      errors.push(`dev-proxy: HTTP ${response.status}`)
+    } catch (error) {
+      errors.push(`dev-proxy: ${(error as Error).message}`)
     }
   }
 
-  // Try Cloudflare Worker proxy (production primary)
   if (CF_WORKER_URL) {
     try {
-      const resp = await fetch(`${CF_WORKER_URL}${chartPath}`)
-      if (resp.ok) return resp.json()
-      errors.push(`cf-worker: HTTP ${resp.status}`)
-    } catch (err) {
-      errors.push(`cf-worker: ${(err as Error).message}`)
+      const response = await fetch(`${CF_WORKER_URL}${chartPath}`)
+      if (response.ok) return response.json()
+      errors.push(`cf-worker: HTTP ${response.status}`)
+    } catch (error) {
+      errors.push(`cf-worker: ${(error as Error).message}`)
     }
   }
 
-  // Fallback: allorigins (wraps Yahoo response, adds CORS)
   const yahooUrl = `https://query2.finance.yahoo.com${chartPath}`
 
-  // Try allorigins /raw first (returns raw JSON)
   try {
-    const resp = await fetch(
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`
-    )
-    if (resp.ok) return resp.json()
-    errors.push(`allorigins-raw: HTTP ${resp.status}`)
-  } catch (err) {
-    errors.push(`allorigins-raw: ${(err as Error).message}`)
+    const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`)
+    if (response.ok) return response.json()
+    errors.push(`allorigins-raw: HTTP ${response.status}`)
+  } catch (error) {
+    errors.push(`allorigins-raw: ${(error as Error).message}`)
   }
 
-  // Try allorigins /get (wraps in {contents: "..."} envelope)
   try {
-    const resp = await fetch(
-      `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`
-    )
-    if (resp.ok) {
-      const wrapper = (await resp.json()) as { contents?: string }
-      if (wrapper?.contents) return JSON.parse(wrapper.contents)
+    const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`)
+    if (response.ok) {
+      const wrapper = await response.json() as { contents?: string }
+      if (wrapper.contents) return JSON.parse(wrapper.contents)
     }
-    errors.push(`allorigins-get: HTTP ${resp.status}`)
-  } catch (err) {
-    errors.push(`allorigins-get: ${(err as Error).message}`)
+    errors.push(`allorigins-get: HTTP ${response.status}`)
+  } catch (error) {
+    errors.push(`allorigins-get: ${(error as Error).message}`)
   }
 
-  throw new Error(`All data sources failed: ${errors.join('; ')}`)
+  throw new Error(`All market data sources failed: ${errors.join('; ')}`)
 }
 
-function parseChartResponse(data: unknown) {
-  const result = (data as { chart?: { result?: unknown[] } })?.chart
-    ?.result?.[0] as
-    | {
-        meta?: Record<string, unknown>
-        timestamp?: number[]
-        indicators?: { quote?: Record<string, (number | null)[]>[] }
-      }
-    | undefined
-  if (!result?.meta) throw new Error('No data returned from Yahoo Finance')
+function parseChartResponse(data: unknown): ChartResult {
+  const result = (data as { chart?: { result?: ChartResult[] } })?.chart?.result?.[0]
+  if (!result?.meta) throw new Error('No market data returned from Yahoo Finance')
   return result
 }
 
+function toPricePoints(result: ChartResult): PricePoint[] {
+  const timestamps = result.timestamp ?? []
+  const quotes = result.indicators?.quote?.[0] ?? {}
+
+  return timestamps
+    .map((timestamp, index) => ({
+      date: new Date(timestamp * 1000).toISOString(),
+      open: quotes.open?.[index] ?? 0,
+      high: quotes.high?.[index] ?? 0,
+      low: quotes.low?.[index] ?? 0,
+      close: quotes.close?.[index] ?? 0,
+      volume: quotes.volume?.[index] ?? 0,
+    }))
+    .filter(point => point.open > 0 && point.high > 0 && point.low > 0 && point.close > 0)
+}
+
+async function fetchChart(symbol: string, query: string): Promise<ChartResult> {
+  return parseChartResponse(await fetchFromYahoo(`${YAHOO_CHART_PATH}/${symbol}?${query}`))
+}
+
 export async function fetchMarketData(symbol: string = 'VWRA.L'): Promise<MarketData> {
-  // Fetch both 1d (for current data) and 1y (for accurate 52-week range)
-  const [dayData, yearData] = await Promise.all([
-    fetchFromYahoo(`${YAHOO_CHART_PATH}/${symbol}?range=1d&interval=5m`),
-    fetchFromYahoo(`${YAHOO_CHART_PATH}/${symbol}?range=1y&interval=1wk`),
+  const [intraday, yearly] = await Promise.all([
+    fetchChart(symbol, 'range=1d&interval=5m'),
+    fetchChart(symbol, 'range=1y&interval=1wk'),
   ])
 
-  const dayResult = parseChartResponse(dayData)
-  const meta = dayResult.meta!
-
-  // Compute 52-week high/low from actual historical closing prices
-  const yearResult = parseChartResponse(yearData)
-  const yearQuotes = yearResult.indicators?.quote?.[0] || {}
-  const closes = (yearQuotes.close || []).filter((v): v is number => v != null && v > 0)
-  const week52High = closes.length > 0 ? Math.max(...closes) : 0
-  const week52Low = closes.length > 0 ? Math.min(...closes) : 0
-
-  const info = SYMBOL_META[symbol] || { name: symbol, exchange: '', currency: 'USD', expenseRatio: 0 }
+  const yearCloses = toPricePoints(yearly).map(point => point.close)
+  const meta = intraday.meta ?? {}
+  const info = SYMBOL_META[symbol] ?? { name: symbol, exchange: '', currency: 'USD', expenseRatio: 0 }
 
   return {
     symbol: symbol.replace('.L', '').replace('=F', ''),
     name: info.name,
     exchange: info.exchange,
     currency: info.currency,
-    price: (meta.regularMarketPrice as number) || 0,
-    previousClose:
-      (meta.chartPreviousClose as number) ||
-      (meta.previousClose as number) ||
-      0,
-    open: (meta.regularMarketOpen as number) || 0,
-    dayHigh:
-      (meta.regularMarketDayHigh as number) || (meta.dayHigh as number) || 0,
-    dayLow:
-      (meta.regularMarketDayLow as number) || (meta.dayLow as number) || 0,
-    volume: (meta.regularMarketVolume as number) || 0,
-    avgVolume: 55000,
-    week52High,
-    week52Low,
+    price: meta.regularMarketPrice ?? 0,
+    previousClose: meta.chartPreviousClose ?? meta.previousClose ?? 0,
+    open: meta.regularMarketOpen ?? 0,
+    dayHigh: meta.regularMarketDayHigh ?? meta.dayHigh ?? 0,
+    dayLow: meta.regularMarketDayLow ?? meta.dayLow ?? 0,
+    volume: meta.regularMarketVolume ?? 0,
+    avgVolume: symbol === 'VWRA.L' ? 55000 : 0,
+    week52High: yearCloses.length > 0 ? Math.max(...yearCloses) : 0,
+    week52Low: yearCloses.length > 0 ? Math.min(...yearCloses) : 0,
     marketCap: 0,
-    nav: (meta.regularMarketPrice as number) || 0,
+    nav: meta.regularMarketPrice ?? 0,
     expenseRatio: info.expenseRatio,
-    timestamp: Date.now(),
+    timestamp: (meta.regularMarketTime ?? Math.floor(Date.now() / 1000)) * 1000,
   }
 }
 
-export async function fetchMultiSymbolData(
-  symbols: string[]
-): Promise<Record<string, MarketData>> {
-  const results = await Promise.all(symbols.map(s => fetchMarketData(s)))
-  const map: Record<string, MarketData> = {}
-  symbols.forEach((s, i) => { map[s] = results[i] })
-  return map
+export async function fetchMultiSymbolData(symbols: string[]): Promise<Record<string, MarketData>> {
+  const results = await Promise.all(symbols.map(symbol => fetchMarketData(symbol)))
+  return Object.fromEntries(symbols.map((symbol, index) => [symbol, results[index]]))
 }
 
 export async function fetchPriceHistory(
   symbol: string = 'VWRA.L',
-  range: '1d' | '5d' | '1mo' | '3mo' | '6mo' | '1y' = '1mo'
+  range: '1d' | '5d' | '1mo' | '3mo' | '6mo' | '1y' = '1mo',
 ): Promise<PricePoint[]> {
-  const intervalMap: Record<string, string> = {
+  const intervalMap: Record<typeof range, string> = {
     '1d': '5m',
     '5d': '15m',
-    '1mo': '1d',
-    '3mo': '1d',
+    '1mo': '30m',
+    '3mo': '60m',
     '6mo': '1d',
     '1y': '1wk',
   }
 
-  const path = `${YAHOO_CHART_PATH}/${symbol}?range=${range}&interval=${intervalMap[range]}`
-  const data = await fetchFromYahoo(path)
-  const result = parseChartResponse(data)
-
-  const timestamps = result.timestamp || []
-  const quotes = result.indicators?.quote?.[0] || {}
-  return timestamps.map((ts: number, i: number) => ({
-    date: new Date(ts * 1000).toISOString(),
-    open: quotes.open?.[i] || 0,
-    high: quotes.high?.[i] || 0,
-    low: quotes.low?.[i] || 0,
-    close: quotes.close?.[i] || 0,
-    volume: quotes.volume?.[i] || 0,
-  }))
+  const result = await fetchChart(symbol, `range=${range}&interval=${intervalMap[range]}`)
+  return toPricePoints(result)
 }
 
-/**
- * Fetch historical daily data from a specific start date.
- * Uses period1/period2 for precise date control.
- * Caches in localStorage to avoid refetching.
- */
 export async function fetchHistoricalData(
   symbol: string,
-  startDate: Date = new Date('2026-03-01')
+  startDate: Date = new Date('2026-03-01T00:00:00Z'),
+  interval: '30m' | '60m' | '1d' = '30m',
 ): Promise<PricePoint[]> {
-  const cacheKey = `hist_${symbol}_${startDate.toISOString().split('T')[0]}`
+  const cacheKey = `hist_${symbol}_${startDate.toISOString()}_${interval}`
   const cached = localStorage.getItem(cacheKey)
+
   if (cached) {
     try {
       const parsed = JSON.parse(cached) as { ts: number; data: PricePoint[] }
-      // Re-fetch if cache is older than 5 minutes
-      if (Date.now() - parsed.ts < 5 * 60 * 1000) return parsed.data
-    } catch { /* ignore bad cache */ }
+      const ttl = interval === '1d' ? 30 * 60 * 1000 : 2 * 60 * 1000
+      if (Date.now() - parsed.ts < ttl) return parsed.data
+    } catch {
+      localStorage.removeItem(cacheKey)
+    }
   }
 
   const period1 = Math.floor(startDate.getTime() / 1000)
   const period2 = Math.floor(Date.now() / 1000)
-  const path = `${YAHOO_CHART_PATH}/${symbol}?period1=${period1}&period2=${period2}&interval=1d`
-
-  const data = await fetchFromYahoo(path)
-  const result = parseChartResponse(data)
-
-  const timestamps = result.timestamp || []
-  const quotes = result.indicators?.quote?.[0] || {}
-  const points: PricePoint[] = timestamps
-    .map((ts: number, i: number) => ({
-      date: new Date(ts * 1000).toISOString(),
-      open: quotes.open?.[i] || 0,
-      high: quotes.high?.[i] || 0,
-      low: quotes.low?.[i] || 0,
-      close: quotes.close?.[i] || 0,
-      volume: quotes.volume?.[i] || 0,
-    }))
-    .filter(p => p.close > 0)
+  const result = await fetchChart(symbol, `period1=${period1}&period2=${period2}&interval=${interval}`)
+  const points = toPricePoints(result)
 
   localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: points }))
   return points

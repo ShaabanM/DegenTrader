@@ -1,266 +1,154 @@
-import { useState, useRef, useEffect } from 'react'
-import type { BacktestResult } from '../types/market'
-import { formatCurrency, formatPercent, formatDate } from '../utils/format'
+import { useMemo, useState } from 'react'
+import type { BacktestResult, EquityPoint } from '../types/market'
+import { formatCurrency, formatDateTime, formatPercent } from '../utils/format'
 
 interface BacktestResultsProps {
   results: BacktestResult[]
+  startingCapital: number
+  onStartingCapitalChange: (value: number) => void
 }
 
-function EquityCurve({ data, color }: { data: { date: string; equity: number }[]; color: string }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+function curvePath(points: EquityPoint[], field: 'equity' | 'benchmark') {
+  const values = points.map(point => point[field] ?? point.equity)
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const span = max - min || 1
 
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas || data.length < 2) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    const dpr = window.devicePixelRatio || 1
-    const rect = canvas.getBoundingClientRect()
-    canvas.width = rect.width * dpr
-    canvas.height = rect.height * dpr
-    ctx.scale(dpr, dpr)
-
-    const w = rect.width
-    const h = rect.height
-    const pad = { top: 15, right: 50, bottom: 25, left: 10 }
-    const cw = w - pad.left - pad.right
-    const ch = h - pad.top - pad.bottom
-
-    const equities = data.map(d => d.equity)
-    const min = Math.min(...equities) * 0.99
-    const max = Math.max(...equities) * 1.01
-    const range = max - min || 1
-
-    ctx.clearRect(0, 0, w, h)
-
-    // Grid
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)'
-    ctx.lineWidth = 1
-    for (let i = 0; i <= 4; i++) {
-      const y = pad.top + (i / 4) * ch
-      ctx.beginPath()
-      ctx.moveTo(pad.left, y)
-      ctx.lineTo(w - pad.right, y)
-      ctx.stroke()
-
-      const price = max - (i / 4) * range
-      ctx.fillStyle = 'rgba(255,255,255,0.4)'
-      ctx.font = '10px JetBrains Mono, monospace'
-      ctx.textAlign = 'left'
-      ctx.fillText(`$${price.toFixed(0)}`, w - pad.right + 4, y + 3)
-    }
-
-    // 10k reference line
-    const refY = pad.top + (1 - (10000 - min) / range) * ch
-    if (refY > pad.top && refY < h - pad.bottom) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.15)'
-      ctx.setLineDash([4, 4])
-      ctx.beginPath()
-      ctx.moveTo(pad.left, refY)
-      ctx.lineTo(w - pad.right, refY)
-      ctx.stroke()
-      ctx.setLineDash([])
-    }
-
-    // Gradient fill
-    const isUp = equities[equities.length - 1] >= 10000
-    const gradient = ctx.createLinearGradient(0, pad.top, 0, h - pad.bottom)
-    gradient.addColorStop(0, isUp ? 'rgba(0,230,118,0.2)' : 'rgba(255,82,82,0.2)')
-    gradient.addColorStop(1, 'transparent')
-
-    const toX = (i: number) => pad.left + (i / (data.length - 1)) * cw
-    const toY = (val: number) => pad.top + (1 - (val - min) / range) * ch
-
-    ctx.beginPath()
-    ctx.moveTo(toX(0), toY(equities[0]))
-    for (let i = 1; i < equities.length; i++) ctx.lineTo(toX(i), toY(equities[i]))
-    ctx.lineTo(toX(equities.length - 1), h - pad.bottom)
-    ctx.lineTo(toX(0), h - pad.bottom)
-    ctx.closePath()
-    ctx.fillStyle = gradient
-    ctx.fill()
-
-    // Line
-    ctx.beginPath()
-    ctx.moveTo(toX(0), toY(equities[0]))
-    for (let i = 1; i < equities.length; i++) ctx.lineTo(toX(i), toY(equities[i]))
-    ctx.strokeStyle = color
-    ctx.lineWidth = 2
-    ctx.lineJoin = 'round'
-    ctx.stroke()
-
-    // Date labels
-    ctx.fillStyle = 'rgba(255,255,255,0.35)'
-    ctx.font = '10px JetBrains Mono, monospace'
-    ctx.textAlign = 'center'
-    const labelCount = Math.min(4, data.length)
-    for (let i = 0; i < labelCount; i++) {
-      const idx = Math.floor(i * (data.length - 1) / (labelCount - 1))
-      ctx.fillText(formatDate(data[idx].date), toX(idx), h - 5)
-    }
-  }, [data, color])
-
-  return <canvas ref={canvasRef} className="equity-canvas" />
+  return points.map((point, index) => {
+    const value = point[field] ?? point.equity
+    const x = (index / Math.max(points.length - 1, 1)) * 100
+    const y = 100 - ((value - min) / span) * 100
+    return `${index === 0 ? 'M' : 'L'} ${x} ${y}`
+  }).join(' ')
 }
 
-function StatsGrid({ result }: { result: BacktestResult }) {
-  const isPositive = result.totalReturn >= 0
+export function BacktestResults({ results, startingCapital, onStartingCapitalChange }: BacktestResultsProps) {
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
-  return (
-    <div className="bt-stats-grid">
-      <div className="bt-stat">
-        <span className="bt-stat-label">Total Return</span>
-        <span className={`bt-stat-value ${isPositive ? 'positive' : 'negative'}`}>
-          {formatCurrency(result.totalReturn)}
-        </span>
-        <span className={`bt-stat-pct ${isPositive ? 'positive' : 'negative'}`}>
-          {formatPercent(result.totalReturnPct)}
-        </span>
-      </div>
-      <div className="bt-stat">
-        <span className="bt-stat-label">Win Rate</span>
-        <span className="bt-stat-value">{result.winRate.toFixed(0)}%</span>
-      </div>
-      <div className="bt-stat">
-        <span className="bt-stat-label">Max Drawdown</span>
-        <span className="bt-stat-value negative">-{result.maxDrawdown.toFixed(1)}%</span>
-      </div>
-      <div className="bt-stat">
-        <span className="bt-stat-label">Trades</span>
-        <span className="bt-stat-value">{result.trades.length}</span>
-      </div>
-      <div className="bt-stat">
-        <span className="bt-stat-label">Sharpe</span>
-        <span className="bt-stat-value">{result.sharpeRatio.toFixed(2)}</span>
-      </div>
-    </div>
-  )
-}
+  const selected = useMemo(() => {
+    if (results.length === 0) return null
+    return results.find(result => result.algoId === selectedId) ?? results[0]
+  }, [results, selectedId])
 
-function CompareView({ results }: { results: BacktestResult[] }) {
-  return (
-    <div className="bt-compare">
-      <div className="bt-compare-table">
-        <div className="bt-compare-header">
-          <span>Algorithm</span>
-          <span>Return</span>
-          <span>Win%</span>
-          <span>Drawdown</span>
-          <span>Trades</span>
-        </div>
-        {results.map(r => (
-          <div key={r.algoId} className="bt-compare-row">
-            <span className="bt-compare-name">{r.algoName}</span>
-            <span className={r.totalReturn >= 0 ? 'positive' : 'negative'}>
-              {formatPercent(r.totalReturnPct)}
-            </span>
-            <span>{r.winRate.toFixed(0)}%</span>
-            <span className="negative">-{r.maxDrawdown.toFixed(1)}%</span>
-            <span>{r.trades.length}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function TradeList({ result }: { result: BacktestResult }) {
-  if (result.trades.length === 0) return <p className="signal-reasoning">No trades generated</p>
-
-  return (
-    <div className="bt-trade-list">
-      <div className="bt-trade-header">
-        <span>Entry</span>
-        <span>Exit</span>
-        <span>Type</span>
-        <span>P&L</span>
-      </div>
-      {result.trades.slice(-20).reverse().map((trade, i) => (
-        <div key={i} className="bt-trade-row">
-          <span className="bt-trade-date">{formatDate(trade.entryDate)}</span>
-          <span className="bt-trade-date">{formatDate(trade.exitDate)}</span>
-          <span className={`bt-trade-type ${trade.action === 'BUY' ? 'positive' : 'negative'}`}>
-            {trade.action}
-          </span>
-          <span className={trade.pnl >= 0 ? 'positive' : 'negative'}>
-            {formatPercent(trade.pnlPct)}
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-const COLORS = ['#00e676', '#448aff', '#ffd740', '#ff9100', '#e040fb']
-
-export function BacktestResults({ results }: BacktestResultsProps) {
-  const [selectedAlgo, setSelectedAlgo] = useState<string>('compare')
-
-  if (results.length === 0) {
+  if (results.length === 0 || !selected) {
     return (
-      <div className="backtest-panel card">
-        <h3 className="card-title">BACKTEST RESULTS</h3>
-        <p className="signal-reasoning">Loading historical data...</p>
-      </div>
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <span className="eyebrow">Backtest lab</span>
+            <h2>Running March 2026 replay</h2>
+          </div>
+        </div>
+        <div className="chart-empty">Loading the aligned 30m history and replaying each model...</div>
+      </section>
     )
   }
 
-  const selectedResult = results.find(r => r.algoId === selectedAlgo)
-
   return (
-    <div className="backtest-panel card">
-      <h3 className="card-title">
-        BACKTEST RESULTS
-        <span className="subtitle">Since Mar 1, 2026 · $10k start</span>
-      </h3>
+    <section className="panel">
+      <div className="panel-head backtest-head">
+        <div>
+          <span className="eyebrow">Backtest lab</span>
+          <h2>Since 1 March 2026</h2>
+        </div>
+        <label className="capital-input">
+          <span>Paper capital</span>
+          <input
+            type="number"
+            min={1000}
+            step={1000}
+            value={startingCapital}
+            onChange={event => onStartingCapitalChange(Number(event.target.value) || 10000)}
+          />
+        </label>
+      </div>
 
-      <div className="bt-tabs">
-        <button
-          className={`bt-tab ${selectedAlgo === 'compare' ? 'active' : ''}`}
-          onClick={() => setSelectedAlgo('compare')}
-        >
-          Compare
-        </button>
-        {results.map(r => (
+      <div className="backtest-table">
+        <div className="backtest-row backtest-header">
+          <span>Model</span>
+          <span>Return</span>
+          <span>Alpha</span>
+          <span>Win</span>
+          <span>Exposure</span>
+        </div>
+        {results.map(result => (
           <button
-            key={r.algoId}
-            className={`bt-tab ${selectedAlgo === r.algoId ? 'active' : ''}`}
-            onClick={() => setSelectedAlgo(r.algoId)}
+            key={result.algoId}
+            className={`backtest-row ${selected.algoId === result.algoId ? 'selected' : ''}`}
+            onClick={() => setSelectedId(result.algoId)}
           >
-            {r.algoName}
+            <span>{result.algoName}</span>
+            <span className={result.totalReturnPct >= 0 ? 'positive' : 'negative'}>{formatPercent(result.totalReturnPct)}</span>
+            <span className={result.alphaPct >= 0 ? 'positive' : 'negative'}>{formatPercent(result.alphaPct)}</span>
+            <span>{result.winRate.toFixed(0)}%</span>
+            <span>{result.exposurePct.toFixed(0)}%</span>
           </button>
         ))}
       </div>
 
-      {selectedAlgo === 'compare' ? (
-        <>
-          <CompareView results={results} />
-          <div className="equity-chart-container">
-            {results.map((r, i) => (
-              r.equityCurve.length > 1 && (
-                <div key={r.algoId} className="equity-overlay">
-                  <EquityCurve data={r.equityCurve} color={COLORS[i % COLORS.length]} />
-                  <span className="equity-legend" style={{ color: COLORS[i % COLORS.length] }}>
-                    {r.algoName}: {formatPercent(r.totalReturnPct)}
-                  </span>
-                </div>
-              )
-            ))}
+      <div className="backtest-detail">
+        <div className="detail-summary">
+          <div>
+            <h3>{selected.algoName}</h3>
+            <p>{selected.description}</p>
           </div>
-        </>
-      ) : selectedResult ? (
-        <>
-          <StatsGrid result={selectedResult} />
-          <div className="equity-chart-container">
-            <EquityCurve
-              data={selectedResult.equityCurve}
-              color={COLORS[results.findIndex(r => r.algoId === selectedAlgo) % COLORS.length]}
-            />
+          <div className="detail-stats">
+            <span>{selected.horizon}</span>
+            <span>{selected.trades.length} trades</span>
+            <span>{selected.avgHoldBars.toFixed(1)} bars avg hold</span>
           </div>
-          <TradeList result={selectedResult} />
-        </>
-      ) : null}
-    </div>
+        </div>
+
+        <div className="equity-panel">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Equity curve">
+            <path d={curvePath(selected.equityCurve, 'benchmark')} className="equity-line benchmark" />
+            <path d={curvePath(selected.equityCurve, 'equity')} className="equity-line strategy" />
+          </svg>
+        </div>
+
+        <div className="pulse-grid">
+          <article className="pulse-stat">
+            <span>Final equity</span>
+            <strong>{formatCurrency(selected.finalEquity)}</strong>
+            <small>{formatPercent(selected.totalReturnPct)} total</small>
+          </article>
+          <article className="pulse-stat">
+            <span>Alpha vs hold</span>
+            <strong className={selected.alphaPct >= 0 ? 'positive' : 'negative'}>{formatPercent(selected.alphaPct)}</strong>
+            <small>Benchmark {formatPercent(selected.benchmarkReturnPct)}</small>
+          </article>
+          <article className="pulse-stat">
+            <span>Win rate</span>
+            <strong>{selected.winRate.toFixed(0)}%</strong>
+            <small>Sharpe {selected.sharpeRatio.toFixed(2)}</small>
+          </article>
+          <article className="pulse-stat">
+            <span>Drawdown</span>
+            <strong className="negative">-{selected.maxDrawdown.toFixed(1)}%</strong>
+            <small>Exposure {selected.exposurePct.toFixed(0)}%</small>
+          </article>
+        </div>
+
+        <div className="trade-tape">
+          <div className="trade-tape-head">
+            <span>Recent replay trades</span>
+            <span>BUY = enter VWRA, SELL = exit to cash</span>
+          </div>
+          {selected.trades.length === 0 ? (
+            <div className="chart-empty">This model did not trigger enough clean entries.</div>
+          ) : (
+            selected.trades.slice(-8).reverse().map((trade, index) => (
+              <div key={`${trade.entryDate}-${index}`} className="trade-tape-row">
+                <span>{formatDateTime(trade.entryDate)}</span>
+                <span>{formatDateTime(trade.exitDate)}</span>
+                <span>{trade.barsHeld ?? 0} bars</span>
+                <span className={trade.pnlPct >= 0 ? 'positive' : 'negative'}>{formatPercent(trade.pnlPct)}</span>
+                <span>{trade.exitReason ?? 'signal'}</span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </section>
   )
 }

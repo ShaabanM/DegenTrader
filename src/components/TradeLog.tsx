@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { LoggedTrade } from '../types/market'
 import { calculateTradeFees } from '../utils/fees'
 import { formatCurrency, formatPercent } from '../utils/format'
@@ -13,244 +13,117 @@ interface TradeLogProps {
 
 export function TradeLog({ trades, currentPrice, onAdd, onRemove, onClearAll }: TradeLogProps) {
   const [shares, setShares] = useState(30)
-  const [buyPrice, setBuyPrice] = useState(currentPrice || 165)
+  const [buyPriceOverride, setBuyPriceOverride] = useState<number | null>(null)
   const [note, setNote] = useState('')
-  const [showForm, setShowForm] = useState(false)
-  const [initialized, setInitialized] = useState(false)
+  const buyPrice = buyPriceOverride ?? currentPrice
 
-  if (!initialized && currentPrice > 0) {
-    setBuyPrice(Math.round(currentPrice * 100) / 100)
-    setInitialized(true)
-  }
-
-  const handleAdd = () => {
-    const cost = shares * buyPrice
-    const buyFees = calculateTradeFees(cost)
-    onAdd({
-      shares,
-      buyPrice,
-      totalCost: cost + buyFees.totalFees,
-      buyFees: buyFees.totalFees,
-      note,
-    })
-    setNote('')
-    setShowForm(false)
-  }
-
-  // Aggregate portfolio stats
   const portfolio = useMemo(() => {
     if (trades.length === 0) return null
 
-    const totalShares = trades.reduce((s, t) => s + t.shares, 0)
-    const totalCost = trades.reduce((s, t) => s + t.totalCost, 0)
-    const totalBuyFees = trades.reduce((s, t) => s + t.buyFees, 0)
-    const avgBuyPrice = totalShares > 0
-      ? trades.reduce((s, t) => s + t.shares * t.buyPrice, 0) / totalShares
-      : 0
-
+    const totalShares = trades.reduce((sum, trade) => sum + trade.shares, 0)
+    const grossCost = trades.reduce((sum, trade) => sum + trade.shares * trade.buyPrice, 0)
+    const totalCost = trades.reduce((sum, trade) => sum + trade.totalCost, 0)
     const currentValue = totalShares * currentPrice
     const sellFees = calculateTradeFees(currentValue)
-    const grossPnl = currentValue - trades.reduce((s, t) => s + t.shares * t.buyPrice, 0)
-    const roundTripFees = totalBuyFees + sellFees.totalFees
-    const netPnl = grossPnl - roundTripFees
-
-    // Break-even sell price (round up to $0.10)
-    let breakEvenPrice = 0
-    if (totalShares > 0) {
-      breakEvenPrice = totalCost / totalShares
-      for (let i = 0; i < 20; i++) {
-        const beSellValue = breakEvenPrice * totalShares
-        const beSellFees = calculateTradeFees(beSellValue)
-        breakEvenPrice = (totalCost + beSellFees.totalFees) / totalShares
-      }
-      breakEvenPrice = Math.ceil(breakEvenPrice * 10) / 10
-    }
-
-    const returnPct = totalCost > 0 ? (netPnl / (totalCost - totalBuyFees)) * 100 : 0
+    const netPnl = currentValue - totalCost - sellFees.totalFees
+    const returnPct = grossCost > 0 ? (netPnl / grossCost) * 100 : 0
 
     return {
       totalShares,
       totalCost,
-      totalBuyFees,
-      avgBuyPrice,
       currentValue,
-      sellFees: sellFees.totalFees,
-      roundTripFees,
-      grossPnl,
       netPnl,
       returnPct,
-      breakEvenPrice,
+      averageBuy: totalShares > 0 ? grossCost / totalShares : 0,
+      sellFees: sellFees.totalFees,
     }
-  }, [trades, currentPrice])
+  }, [currentPrice, trades])
+
+  function handleAdd() {
+    const gross = shares * buyPrice
+    const fees = calculateTradeFees(gross)
+    onAdd({
+      shares,
+      buyPrice,
+      totalCost: gross + fees.totalFees,
+      buyFees: fees.totalFees,
+      note,
+    })
+    setNote('')
+  }
 
   return (
-    <div className="card trade-log-card">
-      <h3 className="card-title">
-        Trade Log
-        <span className="subtitle">
-          {trades.length} trade{trades.length !== 1 ? 's' : ''} logged
-        </span>
-      </h3>
-
-      {/* Portfolio Summary */}
-      {portfolio && (
-        <div className="portfolio-summary">
-          <div className="portfolio-hero">
-            <div className="portfolio-stat-block">
-              <span className="portfolio-label">Position Value</span>
-              <span className="portfolio-value">{formatCurrency(portfolio.currentValue)}</span>
-            </div>
-            <div className="portfolio-stat-block">
-              <span className="portfolio-label">Net P&L (if sold now)</span>
-              <span className={`portfolio-value ${portfolio.netPnl >= 0 ? 'positive' : 'negative'}`}>
-                {formatCurrency(portfolio.netPnl)}
-              </span>
-              <span className={`portfolio-pct ${portfolio.netPnl >= 0 ? 'positive' : 'negative'}`}>
-                {formatPercent(portfolio.returnPct)}
-              </span>
-            </div>
-          </div>
-
-          <div className="portfolio-details">
-            <div className="detail-row">
-              <span>Total shares</span>
-              <span className="mono">{portfolio.totalShares}</span>
-            </div>
-            <div className="detail-row">
-              <span>Avg buy price</span>
-              <span className="mono">{formatCurrency(portfolio.avgBuyPrice)}</span>
-            </div>
-            <div className="detail-row">
-              <span>Total invested (incl. buy fees)</span>
-              <span className="mono">{formatCurrency(portfolio.totalCost)}</span>
-            </div>
-            <div className="detail-row separator">
-              <span>Gross P&L</span>
-              <span className={`mono ${portfolio.grossPnl >= 0 ? 'positive' : 'negative'}`}>
-                {formatCurrency(portfolio.grossPnl)}
-              </span>
-            </div>
-            <div className="fee-breakdown">
-              <div className="detail-row fee">
-                <span>Buy fees (paid)</span>
-                <span className="mono negative">-{formatCurrency(portfolio.totalBuyFees)}</span>
-              </div>
-              <div className="detail-row fee">
-                <span>Sell fees (estimated)</span>
-                <span className="mono negative">-{formatCurrency(portfolio.sellFees)}</span>
-              </div>
-              <div className="detail-row total-fees">
-                <span>Round-trip fees</span>
-                <span className="mono negative">-{formatCurrency(portfolio.roundTripFees)}</span>
-              </div>
-            </div>
-            <div className="detail-row highlight">
-              <span>Break-even sell price</span>
-              <span className="mono">{formatCurrency(portfolio.breakEvenPrice)}</span>
-            </div>
-            <div className="detail-row">
-              <span>Current price</span>
-              <span className="mono">{formatCurrency(currentPrice)}</span>
-            </div>
-            <div className="detail-row">
-              <span>Distance to break-even</span>
-              <span className={`mono ${currentPrice >= portfolio.breakEvenPrice ? 'positive' : 'negative'}`}>
-                {formatCurrency(currentPrice - portfolio.breakEvenPrice)}
-                {' '}({formatPercent(((currentPrice - portfolio.breakEvenPrice) / portfolio.breakEvenPrice) * 100)})
-              </span>
-            </div>
-          </div>
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <span className="eyebrow">Trade journal</span>
+          <h2>Your actual VWRA entries</h2>
         </div>
-      )}
+        {trades.length > 1 && (
+          <button className="ghost-btn" onClick={onClearAll}>Clear all</button>
+        )}
+      </div>
 
-      {/* Trade list */}
-      {trades.length > 0 && (
-        <div className="trade-list">
-          <div className="trade-list-header">
-            <span>Date</span>
+      <div className="trade-tab-grid compact">
+        <div className="form-stack">
+          <label className="field">
             <span>Shares</span>
-            <span>Buy Price</span>
-            <span>Cost</span>
-            <span>P&L Now</span>
-            <span></span>
+            <input type="number" min={1} step={1} value={shares} onChange={event => setShares(Number(event.target.value))} />
+          </label>
+          <label className="field">
+            <span>Buy price</span>
+            <input type="number" min={0} step={0.01} value={buyPrice} onChange={event => setBuyPriceOverride(Number(event.target.value))} />
+          </label>
+          <label className="field">
+            <span>Note</span>
+            <input type="text" value={note} onChange={event => setNote(event.target.value)} placeholder="Train trade, dip buy, panic exit..." />
+          </label>
+          <button className="primary-btn" onClick={handleAdd}>Add trade</button>
+        </div>
+
+        <div className="planner-summary">
+          {portfolio ? (
+            <>
+              <div className="planner-hero">
+                <span>Live P&L</span>
+                <strong className={portfolio.netPnl >= 0 ? 'positive' : 'negative'}>{formatCurrency(portfolio.netPnl)}</strong>
+                <small className={portfolio.netPnl >= 0 ? 'positive' : 'negative'}>{formatPercent(portfolio.returnPct)}</small>
+              </div>
+              <div className="planner-list">
+                <div><span>Shares held</span><strong>{portfolio.totalShares}</strong></div>
+                <div><span>Avg buy</span><strong>{formatCurrency(portfolio.averageBuy)}</strong></div>
+                <div><span>Current value</span><strong>{formatCurrency(portfolio.currentValue)}</strong></div>
+                <div><span>Estimated sell fees</span><strong className="negative">{formatCurrency(-portfolio.sellFees)}</strong></div>
+              </div>
+            </>
+          ) : (
+            <div className="chart-empty">Add your real entries here so the app can tell you what the position is worth now.</div>
+          )}
+        </div>
+      </div>
+
+      {trades.length > 0 && (
+        <div className="trade-tape">
+          <div className="trade-tape-head">
+            <span>Logged entries</span>
+            <span>Current VWRA {formatCurrency(currentPrice)}</span>
           </div>
-          {trades.map(trade => {
-            const currentVal = trade.shares * currentPrice
-            const sellFees = calculateTradeFees(currentVal)
-            const pnl = currentVal - trade.totalCost - sellFees.totalFees
+          {trades.slice().reverse().map(trade => {
+            const liveValue = trade.shares * currentPrice
+            const sellFees = calculateTradeFees(liveValue)
+            const pnl = liveValue - trade.totalCost - sellFees.totalFees
+
             return (
-              <div key={trade.id} className="trade-row">
-                <span className="mono trade-date">
-                  {new Date(trade.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
-                </span>
-                <span className="mono">{trade.shares}</span>
-                <span className="mono">{formatCurrency(trade.buyPrice)}</span>
-                <span className="mono">{formatCurrency(trade.totalCost)}</span>
-                <span className={`mono ${pnl >= 0 ? 'positive' : 'negative'}`}>
-                  {formatCurrency(pnl)}
-                </span>
-                <button className="remove-trade" onClick={() => onRemove(trade.id)} title="Remove trade">
-                  &times;
-                </button>
+              <div key={trade.id} className="trade-tape-row">
+                <span>{new Date(trade.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
+                <span>{trade.shares} sh @ {formatCurrency(trade.buyPrice)}</span>
+                <span className={pnl >= 0 ? 'positive' : 'negative'}>{formatCurrency(pnl)}</span>
+                <button className="ghost-btn" onClick={() => onRemove(trade.id)}>Remove</button>
               </div>
             )
           })}
-          {trades.length > 1 && (
-            <button className="clear-all-btn" onClick={onClearAll}>
-              Clear all trades
-            </button>
-          )}
         </div>
       )}
-
-      {/* Add trade form */}
-      {showForm ? (
-        <div className="add-trade-form">
-          <div className="form-row">
-            <div className="input-group">
-              <label>Shares</label>
-              <input
-                type="number"
-                value={shares}
-                onChange={e => setShares(Number(e.target.value))}
-                min={1}
-                step={1}
-              />
-            </div>
-            <div className="input-group">
-              <label>Buy Price ($)</label>
-              <input
-                type="number"
-                value={buyPrice}
-                onChange={e => setBuyPrice(Number(e.target.value))}
-                min={0}
-                step={0.01}
-              />
-              <button className="use-current" onClick={() => setBuyPrice(Math.round(currentPrice * 100) / 100)}>
-                Use current
-              </button>
-            </div>
-          </div>
-          <div className="input-group">
-            <label>Note (optional)</label>
-            <input
-              type="text"
-              value={note}
-              onChange={e => setNote(e.target.value)}
-              placeholder="e.g. Monthly DCA"
-              className="note-input"
-            />
-          </div>
-          <div className="form-actions">
-            <button className="log-btn" onClick={handleAdd}>Log Trade</button>
-            <button className="cancel-btn" onClick={() => setShowForm(false)}>Cancel</button>
-          </div>
-        </div>
-      ) : (
-        <button className="add-trade-btn" onClick={() => setShowForm(true)}>
-          + Log a Trade
-        </button>
-      )}
-    </div>
+    </section>
   )
 }

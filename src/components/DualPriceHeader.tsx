@@ -1,96 +1,63 @@
-import { useRef, useEffect } from 'react'
-import type { MarketData, PricePoint } from '../types/market'
+import type { ConsensusSignal, MarketData, MarketPulse } from '../types/market'
 import { formatCurrency, formatPercent } from '../utils/format'
 
 interface DualPriceHeaderProps {
-  vwra: MarketData | undefined
-  oil: MarketData | undefined
-  vwraHistory: PricePoint[]
-  oilHistory: PricePoint[]
+  vwra: MarketData
+  oil: MarketData
+  consensus: ConsensusSignal
+  pulse: MarketPulse | null
 }
 
-function Sparkline({ data, color }: { data: number[]; color: string }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas || data.length < 2) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    const dpr = window.devicePixelRatio || 1
-    const rect = canvas.getBoundingClientRect()
-    canvas.width = rect.width * dpr
-    canvas.height = rect.height * dpr
-    ctx.scale(dpr, dpr)
-
-    const w = rect.width
-    const h = rect.height
-    const min = Math.min(...data)
-    const max = Math.max(...data)
-    const range = max - min || 1
-
-    ctx.clearRect(0, 0, w, h)
-    ctx.strokeStyle = color
-    ctx.lineWidth = 1.5
-    ctx.lineJoin = 'round'
-    ctx.beginPath()
-
-    for (let i = 0; i < data.length; i++) {
-      const x = (i / (data.length - 1)) * w
-      const y = h - ((data[i] - min) / range) * (h - 4) - 2
-      if (i === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    }
-    ctx.stroke()
-  }, [data, color])
-
-  return <canvas ref={canvasRef} className="sparkline-canvas" />
-}
-
-function PriceCardCompact({ data, history, label }: {
-  data: MarketData | undefined
-  history: PricePoint[]
-  label: string
-}) {
-  if (!data) {
-    return (
-      <div className="price-card-compact card">
-        <div className="pcc-label">{label}</div>
-        <div className="pcc-price">--</div>
-      </div>
-    )
-  }
-
+function AssetCard({ label, data }: { label: string; data: MarketData }) {
   const change = data.price - data.previousClose
   const changePct = data.previousClose > 0 ? (change / data.previousClose) * 100 : 0
-  const isUp = change >= 0
-  const sparkData = history.slice(-20).map(p => p.close).filter(c => c > 0)
 
   return (
-    <div className="price-card-compact card">
-      <div className="pcc-top">
-        <div>
-          <div className="pcc-label">{label}</div>
-          <div className="pcc-symbol">{data.symbol}</div>
-        </div>
-        <Sparkline data={sparkData} color={isUp ? '#00e676' : '#ff5252'} />
+    <article className="asset-card">
+      <div className="asset-card-head">
+        <span className="asset-label">{label}</span>
+        <span className="asset-symbol">{data.symbol}</span>
       </div>
-      <div className="pcc-bottom">
-        <span className="pcc-price">{formatCurrency(data.price)}</span>
-        <span className={`pcc-change ${isUp ? 'positive' : 'negative'}`}>
-          {isUp ? '▲' : '▼'} {formatCurrency(Math.abs(change))} ({formatPercent(changePct)})
-        </span>
+      <div className="asset-price">{formatCurrency(data.price, data.currency)}</div>
+      <div className={`asset-change ${change >= 0 ? 'positive' : 'negative'}`}>
+        {formatCurrency(change, data.currency)} · {formatPercent(changePct)}
       </div>
-    </div>
+      <div className="asset-range">
+        <span>H {formatCurrency(data.dayHigh, data.currency)}</span>
+        <span>L {formatCurrency(data.dayLow, data.currency)}</span>
+      </div>
+    </article>
   )
 }
 
-export function DualPriceHeader({ vwra, oil, vwraHistory, oilHistory }: DualPriceHeaderProps) {
+export function DualPriceHeader({ vwra, oil, consensus, pulse }: DualPriceHeaderProps) {
   return (
-    <div className="dual-price-row">
-      <PriceCardCompact data={vwra} history={vwraHistory} label="VWRA" />
-      <PriceCardCompact data={oil} history={oilHistory} label="BRENT" />
-    </div>
+    <section className="hero-grid">
+      <div className="hero-panel">
+        <div className="hero-eyebrow">Decision Now</div>
+        <div className={`hero-action action-${consensus.action.toLowerCase()}`}>{consensus.label}</div>
+        <div className="hero-confidence">
+          <div className="hero-confidence-bar">
+            <div style={{ width: `${consensus.confidence * 100}%` }} />
+          </div>
+          <span>{(consensus.confidence * 100).toFixed(0)}% conviction</span>
+        </div>
+        <p className="hero-summary">{consensus.summary}</p>
+        <div className="hero-support">
+          {consensus.support.length > 0 ? consensus.support.join(' · ') : 'No strong model agreement yet'}
+        </div>
+        {pulse && (
+          <div className="hero-regime">
+            <span>{pulse.regimeLabel}</span>
+            <p>{pulse.regimeSummary}</p>
+          </div>
+        )}
+      </div>
+
+      <div className="asset-card-stack">
+        <AssetCard label="VWRA" data={vwra} />
+        <AssetCard label="Brent" data={oil} />
+      </div>
+    </section>
   )
 }

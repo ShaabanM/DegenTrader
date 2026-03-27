@@ -1,117 +1,88 @@
-import type { AlgoSignal, SignalAction } from '../types/market'
+import type { AlgoSignal, BacktestResult, ConsensusSignal } from '../types/market'
+import { formatPercent } from '../utils/format'
 
 interface AlgoDashboardProps {
   signals: AlgoSignal[]
+  backtests: BacktestResult[]
+  consensus: ConsensusSignal
   compact?: boolean
 }
 
-function getSignalColor(action: SignalAction): string {
-  switch (action) {
-    case 'BUY': return 'signal-buy'
-    case 'SELL': return 'signal-sell'
-    case 'FLAT': return 'signal-flat'
-  }
+function actionClass(action: AlgoSignal['action']) {
+  return `action-${action.toLowerCase()}`
 }
 
-function getSignalEmoji(action: SignalAction): string {
-  switch (action) {
-    case 'BUY': return '▲'
-    case 'SELL': return '▼'
-    case 'FLAT': return '—'
-  }
-}
-
-function ConsensusBar({ signals }: { signals: AlgoSignal[] }) {
-  const active = signals.filter(s => s.action !== 'FLAT')
-  if (active.length === 0) {
-    return (
-      <div className="consensus-bar signal-flat">
-        <span className="consensus-label">CONSENSUS</span>
-        <span className="consensus-action">FLAT</span>
-        <span className="consensus-detail">No strong signals</span>
-      </div>
-    )
-  }
-
-  let buyWeight = 0
-  let sellWeight = 0
-  for (const s of signals) {
-    if (s.action === 'BUY') buyWeight += s.confidence
-    else if (s.action === 'SELL') sellWeight += s.confidence
-  }
-
-  const totalWeight = buyWeight + sellWeight
-  const consensus: SignalAction = buyWeight > sellWeight ? 'BUY' : sellWeight > buyWeight ? 'SELL' : 'FLAT'
-  const avgConfidence = totalWeight > 0
-    ? (consensus === 'BUY' ? buyWeight : sellWeight) / signals.length
-    : 0
+export function AlgoDashboard({ signals, backtests, consensus, compact = false }: AlgoDashboardProps) {
+  const resultsById = new Map(backtests.map(result => [result.algoId, result]))
+  const orderedSignals = [...signals].sort((left, right) => {
+    const leftAlpha = resultsById.get(left.id)?.alphaPct ?? -999
+    const rightAlpha = resultsById.get(right.id)?.alphaPct ?? -999
+    return rightAlpha - leftAlpha || right.confidence - left.confidence
+  })
 
   return (
-    <div className={`consensus-bar ${getSignalColor(consensus)}`}>
-      <span className="consensus-label">CONSENSUS</span>
-      <span className="consensus-action">
-        {getSignalEmoji(consensus)} {consensus}
-      </span>
-      <div className="consensus-meter">
-        <div
-          className="consensus-fill"
-          style={{ width: `${avgConfidence * 100}%` }}
-        />
-      </div>
-      <span className="consensus-detail">
-        {signals.filter(s => s.action === 'BUY').length}B / {signals.filter(s => s.action === 'SELL').length}S / {signals.filter(s => s.action === 'FLAT').length}F
-      </span>
-    </div>
-  )
-}
-
-function SignalCard({ signal, compact }: { signal: AlgoSignal; compact?: boolean }) {
-  return (
-    <div className={`signal-card ${getSignalColor(signal.action)}`}>
-      <div className="signal-header">
-        <span className="signal-name">{signal.name}</span>
-        <span className={`signal-badge ${getSignalColor(signal.action)}`}>
-          {getSignalEmoji(signal.action)} {signal.action}
-        </span>
-      </div>
-
-      <div className="confidence-bar">
-        <div
-          className="confidence-fill"
-          style={{ width: `${signal.confidence * 100}%` }}
-        />
-        <span className="confidence-text">{(signal.confidence * 100).toFixed(0)}%</span>
-      </div>
-
-      {!compact && (
-        <p className="signal-reasoning">{signal.reasoning}</p>
-      )}
-
-      {!compact && signal.entryPrice && (
-        <div className="signal-prices">
-          <span>Entry: ${signal.entryPrice.toFixed(2)}</span>
-          {signal.exitPrice && <span>Target: ${signal.exitPrice.toFixed(2)}</span>}
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <span className="eyebrow">Model board</span>
+          <h2>What the algos think right now</h2>
         </div>
-      )}
-    </div>
-  )
-}
-
-export function AlgoDashboard({ signals, compact = false }: AlgoDashboardProps) {
-  return (
-    <div className="algo-dashboard card">
-      <h3 className="card-title">
-        ALGO SIGNALS
-        <span className="subtitle">Updated every 30s</span>
-      </h3>
-
-      <ConsensusBar signals={signals} />
-
-      <div className="signals-grid">
-        {signals.map(signal => (
-          <SignalCard key={signal.id} signal={signal} compact={compact} />
-        ))}
+        <div className="model-counts">
+          <span>{consensus.buyCount} buy</span>
+          <span>{consensus.sellCount} sell</span>
+          <span>{consensus.flatCount} flat</span>
+        </div>
       </div>
-    </div>
+
+      <div className="signal-grid">
+        {orderedSignals.map(signal => {
+          const backtest = resultsById.get(signal.id)
+          return (
+            <article key={signal.id} className={`signal-card ${actionClass(signal.action)}`}>
+              <div className="signal-card-head">
+                <div>
+                  <span className="signal-category">{signal.category}</span>
+                  <h3>{signal.name}</h3>
+                </div>
+                <span className={`signal-pill ${actionClass(signal.action)}`}>{signal.action}</span>
+              </div>
+
+              <div className="signal-meta-row">
+                <span>{signal.horizon}</span>
+                <span>{(signal.confidence * 100).toFixed(0)}% live</span>
+                {backtest && <span>{formatPercent(backtest.alphaPct)} alpha</span>}
+              </div>
+
+              <p className="signal-reason">{signal.reasoning}</p>
+
+              {!compact && signal.reasons.length > 0 && (
+                <div className="signal-points">
+                  {signal.reasons.slice(0, 3).map(reason => (
+                    <span key={reason}>{reason}</span>
+                  ))}
+                </div>
+              )}
+
+              <div className="signal-metrics">
+                {signal.metrics.slice(0, compact ? 2 : 3).map(metric => (
+                  <div key={metric.label} className={`metric-chip tone-${metric.tone ?? 'neutral'}`}>
+                    <span>{metric.label}</span>
+                    <strong>{metric.value}</strong>
+                  </div>
+                ))}
+              </div>
+
+              {backtest && (
+                <div className="signal-footer">
+                  <span>Backtest {formatPercent(backtest.totalReturnPct)}</span>
+                  <span>Win {backtest.winRate.toFixed(0)}%</span>
+                  <span>Exposure {backtest.exposurePct.toFixed(0)}%</span>
+                </div>
+              )}
+            </article>
+          )
+        })}
+      </div>
+    </section>
   )
 }

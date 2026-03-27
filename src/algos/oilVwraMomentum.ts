@@ -1,129 +1,108 @@
-import type { Algorithm, AlgoInput, AlgoOutput, BacktestTrade } from '../types/market'
-import { returns, rollingCorrelation } from './utils'
+import type { Algorithm, AlgoInput, AlgoOutput } from '../types/market'
+import { runLongFlatSignalBacktest } from './backtest'
+import { buildAnalysisSnapshot, clamp, formatSignedPercent } from './utils'
 
-/**
- * Oil-VWRA Momentum: When oil moves big and correlation is high,
- * VWRA follows in the same direction.
- */
 export const oilVwraMomentum: Algorithm = {
-  id: 'oil-vwra-momentum',
-  name: 'Oil Momentum',
-  description: 'Follows oil price moves when correlation with VWRA is strong',
+  id: 'oil-pressure',
+  name: 'Oil Pressure Filter',
+  description: 'Uses Brent as a war-risk throttle: buy only when oil pressure eases and VWRA stays above trend.',
   category: 'cross-asset',
+  horizon: '2h to 1d',
+  minConfidence: 0.5,
+  maxHoldBars: 20,
 
   compute(input: AlgoInput): AlgoOutput {
-    const { vwraPrices, oilPrices } = input
-    if (vwraPrices.length < 10 || oilPrices.length < 10) {
-      return { action: 'FLAT', confidence: 0, reasoning: 'Not enough data' }
-    }
-
-    const vCloses = vwraPrices.map(p => p.close)
-    const oCloses = oilPrices.map(p => p.close)
-    const vRets = returns(vCloses)
-    const oRets = returns(oCloses)
-
-    // 5-day rolling correlation
-    const corr = rollingCorrelation(oRets, vRets, 5)
-    const currentCorr = corr[corr.length - 1]
-
-    // Latest oil daily return
-    const oilReturn = oRets[oRets.length - 1]
-
-    const CORR_THRESHOLD = 0.4
-    const MOVE_THRESHOLD = 0.01 // 1%
-
-    if (isNaN(currentCorr) || Math.abs(currentCorr) < CORR_THRESHOLD) {
+    const snapshot = buildAnalysisSnapshot(input)
+    if (!snapshot) {
       return {
         action: 'FLAT',
-        confidence: 0.2,
-        reasoning: `Weak oil-VWRA correlation (${(currentCorr * 100 || 0).toFixed(0)}%), waiting for alignment`,
+        confidence: 0,
+        reasoning: 'Waiting for enough aligned VWRA and Brent bars.',
       }
     }
 
-    if (Math.abs(oilReturn) < MOVE_THRESHOLD) {
+    const buySetup =
+      snapshot.latestVwra > snapshot.ema21 &&
+      snapshot.oilReturn2h <= -0.004 &&
+      snapshot.correlation20 < -0.1 &&
+      snapshot.distanceFromVwap > -0.003
+
+    const sellSetup =
+      snapshot.latestVwra < snapshot.ema21 ||
+      snapshot.oilReturn2h >= 0.008
+
+    if (buySetup) {
+      const confidence = clamp(
+        0.45 + Math.abs(snapshot.oilReturn2h) * 18 + Math.abs(snapshot.correlation20) * 0.25,
+        0,
+        0.95,
+      )
+
       return {
-        action: 'FLAT',
-        confidence: 0.3,
-        reasoning: `Oil move too small (${(oilReturn * 100).toFixed(2)}%), correlation ${(currentCorr * 100).toFixed(0)}%`,
+        action: 'BUY',
+        confidence,
+        reasoning: `Oil pressure is easing (${formatSignedPercent(snapshot.oilReturn2h)}) while VWRA holds above its 21-bar trend.`,
+        reasons: [
+          `Brent is down ${formatSignedPercent(snapshot.oilReturn2h)} over the last 2h.`,
+          `VWRA is trading ${(snapshot.distanceFromVwap * 100).toFixed(1)}% vs session VWAP.`,
+          `Oil/VWRA correlation is ${(snapshot.correlation20 * 100).toFixed(0)}%, so falling oil is helping the tape.`,
+        ],
+        metrics: [
+          { label: 'Oil 2h', value: formatSignedPercent(snapshot.oilReturn2h), tone: 'positive' },
+          { label: 'Corr 20', value: formatSignedPercent(snapshot.correlation20), tone: 'neutral' },
+          { label: 'VWRA vs EMA21', value: snapshot.latestVwra > snapshot.ema21 ? 'Above' : 'Below', tone: 'positive' },
+        ],
+        entryPrice: snapshot.latestVwra,
+        exitPrice: snapshot.ema21,
       }
     }
 
-    const direction = oilReturn > 0 ? 'BUY' : 'SELL'
-    const confidence = Math.min(1, Math.abs(oilReturn) / 0.03 * Math.abs(currentCorr))
+    if (sellSetup) {
+      const confidence = clamp(
+        0.4 + Math.max(snapshot.oilReturn2h, 0) * 22 + (snapshot.latestVwra < snapshot.ema21 ? 0.15 : 0),
+        0,
+        0.95,
+      )
+
+      return {
+        action: 'SELL',
+        confidence,
+        reasoning: `Oil pressure is back on (${formatSignedPercent(snapshot.oilReturn2h)}) or VWRA has lost its trend support.`,
+        reasons: [
+          `Brent is ${snapshot.oilPressure === 'rising' ? 'climbing' : 'not easing'} over the last 2h.`,
+          `VWRA is ${snapshot.latestVwra > snapshot.ema21 ? 'testing' : 'below'} its 21-bar trend line.`,
+          `This model treats SELL as "go to cash and wait for calmer oil".`,
+        ],
+        metrics: [
+          { label: 'Oil 2h', value: formatSignedPercent(snapshot.oilReturn2h), tone: 'negative' },
+          { label: 'VWRA vs EMA21', value: snapshot.latestVwra > snapshot.ema21 ? 'Above' : 'Below', tone: snapshot.latestVwra > snapshot.ema21 ? 'neutral' : 'negative' },
+          { label: 'VWAP', value: formatSignedPercent(snapshot.distanceFromVwap), tone: snapshot.distanceFromVwap >= 0 ? 'positive' : 'negative' },
+        ],
+        entryPrice: snapshot.latestVwra,
+        exitPrice: snapshot.ema21,
+      }
+    }
 
     return {
-      action: direction,
-      confidence,
-      reasoning: `Oil ${oilReturn > 0 ? 'up' : 'down'} ${(Math.abs(oilReturn) * 100).toFixed(2)}% with ${(currentCorr * 100).toFixed(0)}% correlation`,
-      entryPrice: input.currentVwra,
+      action: 'FLAT',
+      confidence: 0.32,
+      reasoning: 'Oil is not giving a clean risk-on or risk-off shove right now.',
+      reasons: [
+        `Brent 2h move is ${formatSignedPercent(snapshot.oilReturn2h)}.`,
+        `VWRA is ${(snapshot.distanceFromVwap * 100).toFixed(1)}% vs VWAP.`,
+      ],
+      metrics: [
+        { label: 'Oil 2h', value: formatSignedPercent(snapshot.oilReturn2h), tone: 'neutral' },
+        { label: 'Session trend', value: snapshot.sessionTrend.toUpperCase(), tone: 'neutral' },
+      ],
     }
   },
 
-  backtest(input: AlgoInput): BacktestTrade[] {
-    const { vwraPrices, oilPrices } = input
-    const trades: BacktestTrade[] = []
-    const minLen = Math.min(vwraPrices.length, oilPrices.length)
-    if (minLen < 10) return trades
-
-    const vCloses = vwraPrices.slice(0, minLen).map(p => p.close)
-    const oCloses = oilPrices.slice(0, minLen).map(p => p.close)
-    const vRets = returns(vCloses)
-    const oRets = returns(oCloses)
-    const corr = rollingCorrelation(oRets, vRets, 5)
-
-    let position: 'BUY' | 'SELL' | null = null
-    let entryIdx = 0
-
-    for (let i = 6; i < minLen; i++) {
-      const c = corr[i]
-      const oRet = oRets[i]
-      if (isNaN(c)) continue
-
-      let signal: 'BUY' | 'SELL' | 'FLAT' = 'FLAT'
-      if (Math.abs(c) >= 0.4 && Math.abs(oRet) >= 0.01) {
-        signal = oRet > 0 ? 'BUY' : 'SELL'
-      }
-
-      if (position === null && signal !== 'FLAT') {
-        position = signal
-        entryIdx = i
-      } else if (position !== null && signal !== position) {
-        trades.push({
-          entryDate: vwraPrices[entryIdx].date,
-          exitDate: vwraPrices[i].date,
-          entryPrice: vCloses[entryIdx],
-          exitPrice: vCloses[i],
-          action: position,
-          pnl: position === 'BUY'
-            ? vCloses[i] - vCloses[entryIdx]
-            : vCloses[entryIdx] - vCloses[i],
-          pnlPct: position === 'BUY'
-            ? (vCloses[i] - vCloses[entryIdx]) / vCloses[entryIdx] * 100
-            : (vCloses[entryIdx] - vCloses[i]) / vCloses[entryIdx] * 100,
-        })
-        position = signal === 'FLAT' ? null : signal
-        entryIdx = i
-      }
-    }
-
-    // Close any open position
-    if (position !== null) {
-      const lastIdx = minLen - 1
-      trades.push({
-        entryDate: vwraPrices[entryIdx].date,
-        exitDate: vwraPrices[lastIdx].date,
-        entryPrice: vCloses[entryIdx],
-        exitPrice: vCloses[lastIdx],
-        action: position,
-        pnl: position === 'BUY'
-          ? vCloses[lastIdx] - vCloses[entryIdx]
-          : vCloses[entryIdx] - vCloses[lastIdx],
-        pnlPct: position === 'BUY'
-          ? (vCloses[lastIdx] - vCloses[entryIdx]) / vCloses[entryIdx] * 100
-          : (vCloses[entryIdx] - vCloses[lastIdx]) / vCloses[entryIdx] * 100,
-      })
-    }
-
-    return trades
+  backtest(input: AlgoInput) {
+    return runLongFlatSignalBacktest(input, this.compute, {
+      warmupBars: 25,
+      minConfidence: this.minConfidence,
+      maxHoldBars: this.maxHoldBars,
+    })
   },
 }

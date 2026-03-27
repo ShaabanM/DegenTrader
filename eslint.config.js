@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', '.conda', '.ipynb_checkpoints', 'anaconda_projects', 'worker', 'oil_vwra_analysis.ipynb']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

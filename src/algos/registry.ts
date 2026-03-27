@@ -6,9 +6,9 @@ import { oilLeadLag } from './oilLeadLag'
 import { volatilityBreakout } from './volatilityBreakout'
 
 export const algorithms: Algorithm[] = [
-  oilVwraMomentum,
   meanReversion,
   rsiSignal,
-  oilLeadLag,
+  oilVwraMomentum,
   volatilityBreakout,
+  oilLeadLag,
 ]

@@ -1,124 +1,139 @@
-import { useState } from 'react'
-import { useMultiMarketData, usePriceHistory, useHistoricalData } from './hooks/useMarketData'
-import { useAlgoSignals, useBacktests } from './hooks/useAlgoSignals'
-import { useTradeLog } from './hooks/useTradeLog'
+import { useMemo, useState } from 'react'
 import { Header } from './components/Header'
-import { TabNavigation, type TabId } from './components/TabNavigation'
 import { DualPriceHeader } from './components/DualPriceHeader'
 import { AlgoDashboard } from './components/AlgoDashboard'
-import { CorrelationPanel } from './components/CorrelationPanel'
 import { BacktestResults } from './components/BacktestResults'
+import { CorrelationPanel } from './components/CorrelationPanel'
 import { PriceChart } from './components/PriceChart'
-import { TradeSimulator } from './components/TradeSimulator'
+import { TabNavigation, type TabId } from './components/TabNavigation'
 import { TradeLog } from './components/TradeLog'
+import { TradeSimulator } from './components/TradeSimulator'
+import { useAlgoSignals, useBacktests } from './hooks/useAlgoSignals'
+import { useHistoricalData, useMultiMarketData, usePriceHistory } from './hooks/useMarketData'
+import { useTradeLog } from './hooks/useTradeLog'
+import { buildConsensusSignal, buildMarketPulse } from './services/analysis'
 import './App.css'
 
 type ChartRange = '1d' | '5d' | '1mo' | '3mo' | '6mo' | '1y'
 
 function App() {
+  const startDate = useMemo(() => new Date('2026-03-01T00:00:00Z'), [])
   const [activeTab, setActiveTab] = useState<TabId>('live')
-  const [chartRange, setChartRange] = useState<ChartRange>('1mo')
+  const [chartRange, setChartRange] = useState<ChartRange>('5d')
+  const [startingCapital, setStartingCapital] = useState(10000)
 
-  // Multi-symbol market data (30s polling)
-  const { data: multiData, loading, error, lastRefresh, refresh } = useMultiMarketData()
-
-  // Chart data for selected range
+  const { data: liveData, loading, error, lastRefresh, refresh } = useMultiMarketData()
   const { history: vwraChartHistory, loading: chartLoading } = usePriceHistory('VWRA.L', chartRange)
   const { history: oilChartHistory } = usePriceHistory('BZ=F', chartRange)
-
-  // Historical data for algos & backtesting (March 1, 2026+)
-  const { data: historicalData } = useHistoricalData()
-  const vwraHistory = historicalData['VWRA.L'] || []
-  const oilHistory = historicalData['BZ=F'] || []
-
-  // Algo signals (live)
-  const signals = useAlgoSignals(multiData['VWRA.L'], multiData['BZ=F'], vwraHistory, oilHistory)
-
-  // Backtesting
-  const backtests = useBacktests(vwraHistory, oilHistory)
-
-  // Trade log
+  const { data: historicalData, loading: historicalLoading } = useHistoricalData(['VWRA.L', 'BZ=F'], startDate, '30m')
   const { trades, addTrade, removeTrade, clearAll } = useTradeLog()
 
-  const vwraData = multiData['VWRA.L']
-  const oilData = multiData['BZ=F']
+  const vwraData = liveData['VWRA.L']
+  const oilData = liveData['BZ=F']
+  const vwraHistory = useMemo(() => historicalData['VWRA.L'] ?? [], [historicalData])
+  const oilHistory = useMemo(() => historicalData['BZ=F'] ?? [], [historicalData])
+  const signals = useAlgoSignals(vwraData, oilData, vwraHistory, oilHistory)
+  const backtests = useBacktests(vwraHistory, oilHistory, startingCapital)
+
+  const consensus = useMemo(
+    () => buildConsensusSignal(signals, backtests),
+    [signals, backtests],
+  )
+
+  const pulse = useMemo(
+    () => buildMarketPulse(vwraData, oilData, vwraHistory, oilHistory),
+    [vwraData, oilData, vwraHistory, oilHistory],
+  )
+
+  const ready = vwraData && oilData
 
   return (
-    <div className="app">
-      <Header lastRefresh={lastRefresh} onRefresh={refresh} />
+    <div className="app-shell">
+      <Header
+        lastRefresh={lastRefresh}
+        onRefresh={refresh}
+        consensus={consensus}
+        loading={loading}
+      />
 
-      <main className="dashboard">
-        {loading && !vwraData ? (
-          <div className="loading-state">
-            <div className="pulse-ring" />
-            <span>Connecting to market data...</span>
+      <main className="app-main">
+        {error && ready && (
+          <div className="warning-banner">
+            Market refresh hit an error. The dashboard is still showing the latest good snapshot.
           </div>
-        ) : error && !vwraData ? (
-          <div className="error-state">
-            <span>Unable to connect to market data</span>
-            <span className="error-detail">{error}</span>
-            <button onClick={refresh}>Retry</button>
-          </div>
+        )}
+
+        {!ready && loading ? (
+          <section className="empty-state">
+            <div className="empty-orb" />
+            <div>
+              <h2>Connecting to VWRA and Brent</h2>
+              <p>Loading the live tape and the March 2026 intraday history for the models.</p>
+            </div>
+          </section>
+        ) : !ready ? (
+          <section className="empty-state error">
+            <div>
+              <h2>Couldn’t load market data</h2>
+              <p>{error ?? 'Please retry the connection.'}</p>
+            </div>
+            <button className="primary-btn" onClick={refresh}>Retry</button>
+          </section>
         ) : (
           <>
-            {/* Always show dual price header */}
             <DualPriceHeader
               vwra={vwraData}
               oil={oilData}
-              vwraHistory={vwraChartHistory}
-              oilHistory={oilChartHistory}
+              consensus={consensus}
+              pulse={pulse}
             />
 
-            {/* Tab content */}
             {activeTab === 'live' && (
               <>
-                <AlgoDashboard signals={signals} compact />
-
-                <section className="chart-section">
-                  <PriceChart
-                    history={vwraChartHistory}
-                    loading={chartLoading}
-                    range={chartRange}
-                    onRangeChange={setChartRange}
-                    currentPrice={vwraData?.price || 0}
-                    previousClose={vwraData?.previousClose || 0}
-                  />
-                </section>
-
-                <CorrelationPanel
-                  vwraHistory={vwraHistory}
-                  oilHistory={oilHistory}
+                <AlgoDashboard
+                  signals={signals}
+                  backtests={backtests}
+                  consensus={consensus}
+                  compact
                 />
+                <PriceChart
+                  vwraHistory={vwraChartHistory}
+                  oilHistory={oilChartHistory}
+                  loading={chartLoading}
+                  range={chartRange}
+                  onRangeChange={setChartRange}
+                />
+                <CorrelationPanel pulse={pulse} loading={historicalLoading} />
               </>
             )}
 
             {activeTab === 'algos' && (
-              <AlgoDashboard signals={signals} />
+              <AlgoDashboard
+                signals={signals}
+                backtests={backtests}
+                consensus={consensus}
+              />
             )}
 
             {activeTab === 'backtest' && (
-              <BacktestResults results={backtests} />
+              <BacktestResults
+                results={backtests}
+                startingCapital={startingCapital}
+                onStartingCapitalChange={setStartingCapital}
+              />
             )}
 
             {activeTab === 'trade' && (
-              <>
-                {vwraData && (
-                  <section className="simulator-section">
-                    <TradeSimulator currentPrice={vwraData.price} />
-                  </section>
-                )}
-                {vwraData && (
-                  <section className="trade-log-section">
-                    <TradeLog
-                      trades={trades}
-                      currentPrice={vwraData.price}
-                      onAdd={addTrade}
-                      onRemove={removeTrade}
-                      onClearAll={clearAll}
-                    />
-                  </section>
-                )}
-              </>
+              <div className="trade-tab-grid">
+                <TradeSimulator currentPrice={vwraData.price} consensusAction={consensus.action} />
+                <TradeLog
+                  trades={trades}
+                  currentPrice={vwraData.price}
+                  onAdd={addTrade}
+                  onRemove={removeTrade}
+                  onClearAll={clearAll}
+                />
+              </div>
             )}
           </>
         )}
