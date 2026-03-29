@@ -18,14 +18,15 @@ type ChartRange = '1d' | '5d' | '1mo' | '3mo' | '6mo' | '1y'
 
 function App() {
   const startDate = useMemo(() => new Date('2026-03-01T00:00:00Z'), [])
+  const symbols = useMemo(() => ['VWRA.L', 'BZ=F'], [])
   const [activeTab, setActiveTab] = useState<TabId>('live')
   const [chartRange, setChartRange] = useState<ChartRange>('5d')
   const [startingCapital, setStartingCapital] = useState(10000)
 
-  const { data: liveData, loading, error, lastRefresh, refresh } = useMultiMarketData()
+  const { data: liveData, loading, error, lastRefresh, refresh } = useMultiMarketData(symbols)
   const { history: vwraChartHistory, loading: chartLoading } = usePriceHistory('VWRA.L', chartRange)
   const { history: oilChartHistory } = usePriceHistory('BZ=F', chartRange)
-  const { data: historicalData, loading: historicalLoading } = useHistoricalData(['VWRA.L', 'BZ=F'], startDate, '30m')
+  const { data: historicalData, loading: historicalLoading } = useHistoricalData(symbols, startDate, '30m')
   const { trades, addTrade, removeTrade, clearAll } = useTradeLog()
 
   const vwraData = liveData['VWRA.L']

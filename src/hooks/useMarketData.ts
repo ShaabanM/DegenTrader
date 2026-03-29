@@ -37,6 +37,7 @@ export function useMultiMarketData(
   refreshInterval: number = 30000,
 ) {
   const stableKey = useMemo(() => symbols.join(','), [symbols])
+  const stableSymbols = useMemo(() => stableKey.split(','), [stableKey])
   const [data, setData] = useState<Record<string, MarketData>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -47,7 +48,7 @@ export function useMultiMarketData(
     setError(null)
 
     try {
-      const result = await fetchMultiSymbolData(symbols)
+      const result = await fetchMultiSymbolData(stableSymbols)
       setData(result)
       setLastRefresh(Date.now())
     } catch (err) {
@@ -55,13 +56,13 @@ export function useMultiMarketData(
     } finally {
       setLoading(false)
     }
-  }, [symbols])
+  }, [stableSymbols])
 
   useEffect(() => {
     void refresh()
     const interval = window.setInterval(() => void refresh(), refreshInterval)
     return () => window.clearInterval(interval)
-  }, [refresh, refreshInterval, stableKey])
+  }, [refresh, refreshInterval])
 
   return { data, loading, error, lastRefresh, refresh }
 }
@@ -109,6 +110,8 @@ export function useHistoricalData(
   interval: '30m' | '60m' | '1d' = '30m',
 ) {
   const stableKey = useMemo(() => `${symbols.join(',')}:${startDate.toISOString()}:${interval}`, [symbols, startDate, interval])
+  const [symbolKey] = stableKey.split(':')
+  const stableSymbols = useMemo(() => symbolKey.split(','), [symbolKey])
   const [data, setData] = useState<Record<string, PricePoint[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -121,9 +124,9 @@ export function useHistoricalData(
       setError(null)
 
       try {
-        const result = await Promise.all(symbols.map(symbol => fetchHistoricalData(symbol, startDate, interval)))
+        const result = await Promise.all(stableSymbols.map(symbol => fetchHistoricalData(symbol, startDate, interval)))
         if (!cancelled) {
-          setData(Object.fromEntries(symbols.map((symbol, index) => [symbol, result[index]])))
+          setData(Object.fromEntries(stableSymbols.map((symbol, index) => [symbol, result[index]])))
         }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to fetch historical data')
@@ -136,7 +139,7 @@ export function useHistoricalData(
     return () => {
       cancelled = true
     }
-  }, [stableKey, symbols, startDate, interval])
+  }, [stableKey, stableSymbols, startDate, interval])
 
   return { data, loading, error }
 }
